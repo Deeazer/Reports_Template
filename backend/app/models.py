@@ -66,6 +66,9 @@ class Project(Base):
     # социотехническое тестирование: {"scenarios": [...], "targets": [...], "preparation": str,
     #                                 "recommendations": str}
     social = Column(JSON, default=dict)
+    # тестирование отказа в обслуживании: {"intro": str, "stages": [{id,host,start,end,
+    #   duration,method,power,outcome,description,result}], "recommendations": str}
+    dos = Column(JSON, default=dict)
     created_by = Column(Integer, ForeignKey("users.id"))
     updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -3,6 +3,7 @@ import { state, navigate } from "../main.js";
 import { h, field, select, toast, confirmModal, confirmTyped, badge, debouncePatch, whoLine } from "../ui.js";
 import { vulnCard } from "./vuln.js";
 import { socialTab } from "./social.js";
+import { dosTab } from "./dos.js";
 import { historyTab } from "./history.js";
 
 export async function renderProject(pid) {
@@ -84,7 +85,10 @@ export async function renderProject(pid) {
       const wt = key.slice(3);
       // изменения уязвимостей тоже отражаются в «Изменил» у проекта
       const onChanged = () => { p.updated_by_name = auth.user.full_name; p.updated_at = new Date().toISOString(); refreshMeta(); };
-      content.append(ref.work_types[wt].kind === "social" ? socialTab(p, refreshMeta) : vulnsTab(p, wt, onChanged));
+      const kind = ref.work_types[wt].kind;
+      content.append(kind === "social" ? socialTab(p, refreshMeta)
+        : kind === "dos" ? dosTab(p, refreshMeta)
+        : vulnsTab(p, wt, onChanged));
     }
   }
   setTab(active);

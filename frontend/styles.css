@@ -120,8 +120,8 @@ tr:hover td{background:#fafbfc}
 .meta b{font-weight:600;color:var(--text,#333)}
 .hist td{font-size:13px;vertical-align:top}
 @media (max-width:700px){.cols3{grid-template-columns:1fr}}
-/* редактор PoC / результатов: рисунки с автонумерацией по карточке */
-.vuln .body{counter-reset:fig}
+/* редактор PoC / результатов: рисунки с автонумерацией по карточке/разделу */
+.vuln .body,.fig-scope{counter-reset:fig}
 .rich{margin-bottom:8px}
 .rich .ql-toolbar.ql-snow{border-radius:8px 8px 0 0;border-color:var(--line2,#ddd);background:#fafafa}
 .rich .ql-container.ql-snow{border-radius:0 0 8px 8px;border-color:var(--line2,#ddd);font-size:14px}

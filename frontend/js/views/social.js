@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { h, field, toast, debouncePatch } from "../ui.js";
+import { richEditor } from "../richtext.js";
 
 // Вкладка «Социотехническое тестирование»: сценарии, целевая группа, подготовка,
 // рекомендации. Статистика (переходы/вводы) считается на сервере и показывается здесь.
@@ -29,6 +30,20 @@ export function socialTab(p, afterSave) {
     } catch (e) { toast(e.message, true); }
   }, 600);
   const saveAndStat = onSave;
+  // номер главы отчёта для нумерации рисунков (до пересчёта — обычная подпись)
+  const sec = (p.summary || {}).section_no ? p.summary.section_no.social : null;
+  const imgsOf = (section) => (p.images || []).filter(im => im.section === section).sort((a, b) => a.order_index - b.order_index);
+  const richField = (obj, key, section, prefix, ph) => {
+    const ed = richEditor({
+      value: obj[key], legacyImages: imgsOf(section),
+      upload: async (file) => { const im = await api.uploadProjectImage(p.id, file, section, ""); (p.images = p.images || []).push(im); return im; },
+      onChange: (json) => { obj[key] = json; onSave(); },
+      placeholder: ph || "",
+    });
+    const scope = h("div", { class: "fig-scope" }, ed);
+    scope.style.setProperty("--fig-prefix", JSON.stringify(prefix));
+    return scope;
+  };
 
   function renderStats() {
     const st = p.social_stats || {};
@@ -59,8 +74,9 @@ export function socialTab(p, afterSave) {
           field("Название", h("input", { value: sc.name || "", placeholder: "Фишинговая ссылка", oninput: e => { sc.name = e.target.value; saveAndStat(); } })),
           field("Целевая группа", h("input", { value: sc.target_group || "", placeholder: "Сотрудники Заказчика", oninput: e => { sc.target_group = e.target.value; onSave(); } }))),
         field("Повод / триггер", h("input", { value: sc.trigger || "", placeholder: "Инцидент ИБ (смена паролей)", oninput: e => { sc.trigger = e.target.value; onSave(); } })),
-        field("Описание сценария", h("textarea", { oninput: e => { sc.description = e.target.value; onSave(); } }, sc.description || "")),
-        scenarioImages(p, sc)));
+        field("Описание сценария (текст, таблицы, код, скриншоты)",
+          richField(sc, "description", "social:" + sc.id, sec ? `Рисунок ${sec}.2.${i + 1}.` : "Рисунок ",
+            "Опишите сценарий: фишинговое письмо, поддельная страница и т. п."))));
     });
   };
   renderScen();
@@ -103,33 +119,12 @@ export function socialTab(p, afterSave) {
     h("div", { class: "card pad" }, targBox),
     h("div", { style: { marginTop: "16px" } }, h("b", {}, "Итоги (таблица 3.3 и 1.4)"), h("div", { style: { marginTop: "8px" } }, stats)),
     h("div", { class: "card pad", style: { marginTop: "16px" } },
+      field("Описание результатов (текст, таблицы, код, скриншоты)",
+        richField(S, "results_text", "social:results", sec ? `Рисунок ${sec}.` : "Рисунок ",
+          "Развёрнутое описание результатов: статистика рассылки, скриншоты, выводы…"))),
+    h("div", { class: "card pad", style: { marginTop: "16px" } },
       field("Процесс подготовки (необязательно)", h("textarea", { placeholder: "Средства рассылки, обход спам-фильтров и т. п.", oninput: e => { S.preparation = e.target.value; onSave(); } }, S.preparation || "")),
       field("Дополнительные рекомендации (по одной в строке)", h("textarea", { oninput: e => { S.recommendations = e.target.value; onSave(); } }, S.recommendations || ""))),
   );
   return wrap;
-}
-
-// Изображения сценария (фишинговое письмо, поддельная страница и т. п.)
-function scenarioImages(p, sc) {
-  const section = "social:" + sc.id;
-  const list = h("div", { class: "imgs" });
-  const render = () => {
-    list.replaceChildren();
-    (p.images || []).filter(im => im.section === section).sort((a, b) => a.order_index - b.order_index).forEach(im => {
-      const cap = h("input", { value: im.caption, placeholder: "Рисунок — подпись", onchange: e => api.updateProjectImage(im.id, e.target.value).catch(x => toast(x.message, true)) });
-      list.append(h("div", { class: "ic" }, h("img", { src: im.url }),
-        h("div", { class: "cap" }, cap,
-          h("button", { class: "btn danger sm", style: { marginTop: "4px", width: "100%" }, onclick: async () => { try { await api.deleteProjectImage(im.id); p.images = p.images.filter(x => x.id !== im.id); render(); } catch (e) { toast(e.message, true); } } }, "Удалить"))));
-    });
-  };
-  render();
-  const fileInput = h("input", { type: "file", accept: "image/*", style: { display: "none" }, onchange: async e => {
-    const f = e.target.files[0]; if (!f) return;
-    try { const im = await api.uploadProjectImage(p.id, f, section, ""); (p.images = p.images || []).push(im); render(); } catch (x) { toast(x.message, true); }
-    e.target.value = "";
-  } });
-  return h("div", { style: { marginTop: "6px" } },
-    h("div", { class: "between" }, h("span", { class: "muted", style: { fontWeight: 600 } }, "Изображения сценария"),
-      h("button", { class: "btn sec sm", onclick: () => fileInput.click() }, "+ Изображение")),
-    fileInput, list);
 }

@@ -96,6 +96,7 @@ class ProjectUpdate(BaseModel):
     approvals: Optional[list[dict]] = None
     security_notes: Optional[dict] = None
     social: Optional[dict] = None
+    dos: Optional[dict] = None
     member_ids: Optional[list[int]] = None
 
 

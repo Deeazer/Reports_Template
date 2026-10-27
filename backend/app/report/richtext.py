@@ -120,6 +120,10 @@ def render(cell, value, figures: FigureCounter, image_path, size=11, img_width_m
 
     image_path(id) -> путь к файлу изображения или None.
     """
+    # cell может быть ячейкой таблицы или телом документа (для разделов без карточек)
+    root = getattr(cell, "_element", None)
+    if root is None:
+        root = cell.element.body
     ops = parse(value)
     if ops is None:
         if value:
@@ -213,7 +217,7 @@ def render(cell, value, figures: FigureCounter, image_path, size=11, img_width_m
         if prev is None or prev.tag != qn("w:tbl"):
             last._p.getparent().remove(last._p)
     # по стандарту OOXML ячейка не может заканчиваться таблицей — добавляем абзац
-    if len(cell._element) and cell._element[-1].tag == qn("w:tbl"):
+    if len(root) and root[-1].tag == qn("w:tbl"):
         cell.add_paragraph()
 
 

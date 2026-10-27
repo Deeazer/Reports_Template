@@ -10,6 +10,7 @@ const FIELD_LABELS = {
   tools: "инструментарий (2.2)", executors: "исполнители (1.7)", scope: "границы (Прил. 1)",
   approvals: "лист согласования", security_notes: "преимущества (1.4)", member_ids: "доступ к проекту",
   social: "социотехническое тестирование", social_images: "изображения сценариев",
+  dos: "тестирование отказа в обслуживании",
   title: "название", description: "описание", detected_at: "время обнаружения",
   cvss_vector: "CVSS", intruder_models: "модели нарушителя", threat_codes: "угрозы БДУ",
   interface_codes: "интерфейсы", availability: "доступность", ease: "простота эксплуатации",

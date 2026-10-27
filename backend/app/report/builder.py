@@ -359,17 +359,39 @@ def _section_summary(doc, p, summary, settings):
             H.new_paragraph(doc, f"Для {n_nr} {word} уровень опасности не определён (не задан вектор CVSS), "
                                  "в таблицу 3.2 они не включены.", align=L, italic=True)
 
+    ov = 2  # подразделы главы 3 после 3.1 и 3.2
     if "social" in p["work_types"]:
+        ov += 1
+        num = f"3.{ov}"
         st = p.get("social_stats") or {}
         sec = summary["section_no"]["social"]
-        H.heading2(doc, "Результаты социотехнического тестирования", "3.3")
+        H.heading2(doc, "Результаты социотехнического тестирования", num)
         if not st.get("total"):
             H.new_paragraph(doc, "Данные о целевой группе не внесены.", align=L, italic=True)
         else:
-            H.new_paragraph(doc, f"Сводные результаты по сценариям приведены в таблице 3.3.1, подробности — "
+            H.new_paragraph(doc, f"Сводные результаты по сценариям приведены в таблице {num}.1, подробности — "
                                  f"в разделе {sec}.", align=L)
-            H.caption(doc, "Таблица 3.3.1 – Сводные результаты социотехнического тестирования")
+            H.caption(doc, f"Таблица {num}.1 – Сводные результаты социотехнического тестирования")
             _social_stats_table(doc, st)
+
+    if "dos" in p["work_types"]:
+        ov += 1
+        num = f"3.{ov}"
+        dos = p.get("dos") or {}
+        stages = dos.get("stages") or []
+        sec = summary["section_no"]["dos"]
+        H.heading2(doc, "Результаты тестирования отказа в обслуживании", num)
+        if not stages:
+            H.new_paragraph(doc, "Этапы тестирования не внесены.", align=L, italic=True)
+        else:
+            failed = [s for s in stages if s.get("outcome") == "failed"]
+            if failed:
+                hosts = ", ".join(sorted({(s.get("host") or "ресурс").strip() for s in failed}))
+                H.new_paragraph(doc, f"В ходе тестирования достигнут отказ в обслуживании для следующих ресурсов: "
+                                     f"{hosts}. Подробности приведены в разделе {sec}.", align=L)
+            else:
+                H.new_paragraph(doc, f"Исследуемые ресурсы сохранили доступность при всех проведённых атаках. "
+                                     f"Подробности приведены в разделе {sec}.", align=L)
 
 
 # ==========================================================================
@@ -479,6 +501,9 @@ def _work_sections(doc, p, summary, settings):
         if info.get("kind") == "social":
             _social_section(doc, p, sec_no)
             continue
+        if info.get("kind") == "dos":
+            _dos_section(doc, p, sec_no)
+            continue
         ids = order.get(wt, [])
         vmap = {v["id"]: v for v in vulns_by_wt.get(wt, [])}
         if not ids:
@@ -573,9 +598,11 @@ def _social_section(doc, p, sec):
             H.fill_cell(row.cells[3], sc.get("trigger", ""), size=10)
         for i, sc in enumerate(scenarios, 1):
             H.heading3(doc, sc.get("name") or f"Сценарий {i}", f"{sec}.2.{i}")
-            if sc.get("description"):
-                H.new_paragraph(doc, sc["description"], align=L)
-            _project_images(doc, p, f"social:{sc.get('id')}")
+            desc = sc.get("description") or ""
+            RT.render(doc, desc, RT.FigureCounter(f"{sec}.2.{i}"), lambda j: _image_path(f"p{j}"), size=11)
+            if RT.parse(desc) is None:
+                # старый сценарий: скриншоты загружены отдельным блоком
+                _project_images(doc, p, f"social:{sc.get('id')}")
 
     n = 3
     if (social.get("preparation") or "").strip():
@@ -610,6 +637,10 @@ def _social_section(doc, p, sec):
                             align=L)
     else:
         H.new_paragraph(doc, "Данные о целевой группе не внесены.", align=L, italic=True)
+    # развёрнутое описание результатов (форматируемый текст со скриншотами/таблицами)
+    if social.get("results_text"):
+        RT.render(doc, social["results_text"], RT.FigureCounter(f"{sec}.{n}"),
+                  lambda j: _image_path(f"p{j}"), size=11)
     n += 1
 
     H.heading2(doc, "Рекомендации", f"{sec}.{n}")
@@ -623,6 +654,70 @@ def _social_section(doc, p, sec):
     recs += [x.strip() for x in (social.get("recommendations") or "").split("\n") if x.strip()]
     recs += ["внедрить многофакторную аутентификацию для критичных учётных записей",
              "проводить регулярное обучение и тестирование сотрудников (не реже одного раза в 6 месяцев)"]
+    for i, r_ in enumerate(recs):
+        H.bullet(doc, r_ + (";" if i < len(recs) - 1 else "."))
+
+
+# ==========================================================================
+# Тестирование отказа в обслуживании
+# ==========================================================================
+_DOS_FIELDS = [("host", "Хост"), ("start", "Время начала атаки"), ("end", "Время окончания атаки"),
+               ("duration", "Длительность"), ("method", "Тип тестирования"), ("power", "Мощность")]
+
+
+def _dos_stage_table(doc, st):
+    t = _make_table(doc, 2)
+    _header_row(t, ["Категория", "Значение"], widths=[60, 120])
+    for key, label in _DOS_FIELDS:
+        val = (st.get(key) or "").strip()
+        if not val:
+            continue
+        row = t.add_row()
+        H.fill_cell(row.cells[0], label, bold=True, size=11)
+        H.fill_cell(row.cells[1], val, size=11)
+
+
+def _dos_section(doc, p, sec):
+    dos = p.get("dos") or {}
+    stages = dos.get("stages") or []
+    img = lambda i: _image_path(f"p{i}")   # скриншоты этапов — изображения проекта
+
+    n = 1
+    H.heading2(doc, "Исходные данные и описание процесса тестирования", f"{sec}.{n}")
+    intro = dos.get("intro") or ""
+    if intro:
+        RT.render(doc, intro, RT.FigureCounter(f"{sec}.{n}"), img, size=11)
+    else:
+        H.new_paragraph(doc, "Исходные данные о проведении тестирования не внесены.", align=L, italic=True)
+
+    if not stages:
+        n += 1
+        H.heading2(doc, "Этапы тестирования", f"{sec}.{n}")
+        H.new_paragraph(doc, "Этапы тестирования не добавлены.", align=L, italic=True)
+    else:
+        for st in stages:
+            n += 1
+            host = (st.get("host") or "ресурс").strip()
+            method = (st.get("method") or "").strip()
+            title = f"Тестирование ресурса {host}" + (f" методом {method}" if method else "")
+            H.heading2(doc, title, f"{sec}.{n}")
+            figures = RT.FigureCounter(f"{sec}.{n}")
+            if st.get("description"):
+                RT.render(doc, st["description"], figures, img, size=11)
+            H.caption(doc, f"Таблица {sec}.{n}.1 – Сведения об этапе тестирования")
+            _dos_stage_table(doc, st)
+            if st.get("result"):
+                RT.render(doc, st["result"], figures, img, size=11)
+
+    n += 1
+    H.heading2(doc, "Рекомендации", f"{sec}.{n}")
+    recs = [x.strip() for x in (dos.get("recommendations") or "").split("\n") if x.strip()]
+    if not recs:
+        recs = ["внедрить средства защиты от DDoS-атак (WAF или специализированный анти-DDoS сервис)",
+                "обеспечить мониторинг доступности и аномальной сетевой активности ресурсов",
+                "подготовить план реагирования на инциденты, связанные с отказом в обслуживании"]
+    H.new_paragraph(doc, "Для повышения устойчивости к атакам типа «отказ в обслуживании» рекомендуется:",
+                    align=L, first_line=False)
     for i, r_ in enumerate(recs):
         H.bullet(doc, r_ + (";" if i < len(recs) - 1 else "."))
 

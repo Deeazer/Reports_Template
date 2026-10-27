@@ -323,8 +323,28 @@ def social_security(stats: dict) -> tuple[str, list[str], list[str]]:
     return level, dis, adv
 
 
+def dos_security(dos: dict | None) -> tuple[str, list[str], list[str]]:
+    """Уровень устойчивости, недостатки и преимущества для таблицы 1.4.x (отказ в обслуживании)."""
+    stages = (dos or {}).get("stages") or []
+    if not stages:
+        return "Не определён", [], []
+    failed = [s for s in stages if s.get("outcome") == "failed"]
+    dis, adv = [], []
+    if failed:
+        level = "Низкий"
+        for s in failed:
+            host = (s.get("host") or "ресурс").strip()
+            method = (s.get("method") or "").strip()
+            dis.append(f"Ресурс {host} оказался недоступен при атаке"
+                       + (f" методом «{method}»" if method else ""))
+    else:
+        level = "Высокий"
+        adv.append("Исследуемые ресурсы сохранили доступность при всех проведённых атаках")
+    return level, dis, adv
+
+
 def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None,
-                   social: dict | None = None) -> dict:
+                   social: dict | None = None, dos: dict | None = None) -> dict:
     """vulns — список уязвимостей с уже вычисленными производными полями.
 
     Возвращает данные для:
@@ -400,6 +420,12 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
             security[wt] = {"title": R.WORK_TYPES[wt]["summary_title"], "level": level,
                             "disadvantages": dis, "advantages": manual + auto_adv,
                             "manual_advantages": manual, "count": (social or {}).get("total", 0)}
+            continue
+        if R.WORK_TYPES[wt].get("kind") == "dos":
+            level, dis, auto_adv = dos_security(dos or {})
+            security[wt] = {"title": R.WORK_TYPES[wt]["summary_title"], "level": level,
+                            "disadvantages": dis, "advantages": manual + auto_adv,
+                            "manual_advantages": manual, "count": len((dos or {}).get("stages") or [])}
             continue
         ws_vulns = [v for v in vulns if v.get("work_type") == wt]
         # недостатки — все уязвимости, кроме информативных, по убыванию риска
