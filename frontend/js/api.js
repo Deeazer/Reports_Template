@@ -69,7 +69,9 @@ export const api = {
     if (!res.ok) throw new Error("Не удалось сформировать отчёт");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = name || "Отчет.docx"; a.click();
-    URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = name || "Отчет.docx";
+    document.body.append(a); a.click(); a.remove();
+    // освобождаем ссылку позже: при немедленном revoke часть браузеров не успевает начать загрузку
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
 };

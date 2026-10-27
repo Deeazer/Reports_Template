@@ -62,3 +62,14 @@ export function badge(level) {
 export const debounce = (fn, ms = 600) => {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 };
+
+// Как debounce, но для частичных обновлений: патчи, пришедшие за время
+// ожидания, объединяются, чтобы правка одного поля не терялась при быстрой
+// правке другого.
+export const debouncePatch = (fn, ms = 600) => {
+  let t, acc = {};
+  return (patch) => {
+    Object.assign(acc, patch); clearTimeout(t);
+    t = setTimeout(() => { const p = acc; acc = {}; fn(p); }, ms);
+  };
+};

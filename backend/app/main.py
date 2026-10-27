@@ -3,7 +3,7 @@ import time
 import uuid
 from urllib.parse import quote
 from fastapi import (FastAPI, Depends, HTTPException, status, UploadFile, File,
-                     Form, Response)
+                     Form, Response, Body)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -66,7 +66,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     user = db.query(models.User).filter_by(login=form.username).first()
     if not user or not verify_password(form.password, user.password_hash) or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль")
-    return schemas.Token(access_token=create_token(user), role=user.role,
+    return schemas.Token(access_token=create_token(user), id=user.id, role=user.role,
                          full_name=user.full_name or user.login, login=user.login)
 
 
@@ -132,7 +132,7 @@ def read_settings(db: Session = Depends(get_db), _: models.User = Depends(curren
 
 
 @app.put("/api/settings/{key}")
-def write_setting(key: str, value: dict | list, db: Session = Depends(get_db),
+def write_setting(key: str, value: dict | list = Body(...), db: Session = Depends(get_db),
                   _: models.User = Depends(require_admin)):
     return {"key": key, "value": set_setting(db, key, value)}
 

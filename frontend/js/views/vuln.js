@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { state } from "../main.js";
-import { h, field, select, toast, badge, confirmModal, debounce } from "../ui.js";
+import { h, field, select, toast, badge, confirmModal, debouncePatch } from "../ui.js";
 
 // Мультивыбор кодов (угрозы/интерфейсы) из каталога проекта
 function multiPick(options, selected, onChange) {
@@ -23,7 +23,7 @@ export function vulnCard(v, onChange, onDelete, index, project) {
   let open = v._open || false;
   const container = h("div", { class: "vuln" });
 
-  const save = debounce(async (patch) => {
+  const save = debouncePatch(async (patch) => {
     try { const updated = await api.updateVuln(v.id, patch); Object.assign(v, updated); onChange(); refreshHead(); refreshComputed(); refreshAutoHint(); }
     catch (e) { toast(e.message, true); }
   }, 500);

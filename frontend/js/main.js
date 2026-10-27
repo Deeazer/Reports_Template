@@ -68,7 +68,7 @@ export async function render() {
 
 async function onLogin(login, password) {
   const res = await api.login(login, password);
-  auth.set(res.access_token, { full_name: res.full_name, role: res.role, login: res.login });
+  auth.set(res.access_token, { id: res.id, full_name: res.full_name, role: res.role, login: res.login });
   state.route = hashToRoute();
   render();
 }

@@ -1,6 +1,6 @@
 import { api, auth } from "../api.js";
 import { state, navigate } from "../main.js";
-import { h, field, select, toast, confirmModal, badge, debounce } from "../ui.js";
+import { h, field, select, toast, confirmModal, badge, debouncePatch } from "../ui.js";
 import { vulnCard } from "./vuln.js";
 
 export async function renderProject(pid) {
@@ -10,7 +10,7 @@ export async function renderProject(pid) {
   try { if (auth.isAdmin) users = await api.users(); } catch {}
 
   const wrap = h("div", {});
-  const save = debounce(async (patch) => {
+  const save = debouncePatch(async (patch) => {
     try { Object.assign(p, await api.updateProject(pid, patch)); toast("Сохранено"); }
     catch (e) { toast(e.message, true); }
   }, 700);
@@ -35,7 +35,8 @@ export async function renderProject(pid) {
     ...p.work_types.map(wt => ({ key: "wt_" + wt, label: ref.work_types[wt].title })),
     { key: "tools", label: "Инструментарий" },
   ];
-  if (auth.isAdmin || p.created_by === auth.user.id) tabs.push({ key: "access", label: "Доступ" });
+  // список пользователей доступен только администратору, поэтому и вкладка — только ему
+  if (auth.isAdmin) tabs.push({ key: "access", label: "Доступ" });
 
   let active = p.work_types.length ? "wt_" + p.work_types[0] : "general";
   const tabBar = h("div", { class: "tabs" });
