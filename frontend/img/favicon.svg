@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- лист отчёта с триколором флага РФ -->
+  <rect x="10" y="4" width="44" height="56" rx="6" fill="#ffffff" stroke="#e2e4e8" stroke-width="2"/>
+  <rect x="18" y="14" width="28" height="7" rx="2" fill="#ffffff" stroke="#0039A6" stroke-width="1.5"/>
+  <rect x="18" y="26" width="28" height="7" rx="2" fill="#0039A6"/>
+  <rect x="18" y="38" width="28" height="7" rx="2" fill="#D52B1E"/>
+</svg>
