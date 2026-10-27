@@ -60,7 +60,7 @@ export function vulnCard(v, onChange, onDelete, index, project) {
   const refreshMeta = () => meta.replaceChildren(whoLine(v));
 
   // ---- computed display ----
-  const computed = h("div", { class: "card pad", style: { background: "#fff7f2", marginBottom: "14px" } });
+  const computed = h("div", { class: "card pad", style: { background: "#eef2fb", marginBottom: "14px" } });
   function refreshComputed() {
     const score = v.cvss_score;
     const kids = [

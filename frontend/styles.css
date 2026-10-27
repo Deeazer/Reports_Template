@@ -1,9 +1,15 @@
 :root{
-  --orange:#F59369; --orange-d:#e07a4d;
+  /* акцент — синий флага РФ; --orange/--orange-d сохранены как псевдонимы акцента */
+  --accent:#0039A6; --accent-d:#002a7a; --flag-red:#D52B1E;
+  --orange:var(--accent); --orange-d:var(--accent-d);
   --red:#ED4949; --yellow:#FDBF59; --green:#92D050; --blue:#00B0F0; --crit:#BE303E;
-  --bg:#f4f5f7; --card:#fff; --line:#e2e4e8; --text:#232733; --muted:#6b7280;
+  --bg:#f4f6f9; --card:#fff; --line:#e2e4e8; --text:#232733; --muted:#6b7280;
   --radius:10px; --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
 }
+/* триколор флага РФ: белый — синий — красный */
+.flag-bar{height:5px;background:linear-gradient(to bottom,#fff 0 33.33%,var(--accent) 33.33% 66.66%,var(--flag-red) 66.66% 100%);
+  border-bottom:1px solid var(--line)}
+.login-card .flag-bar{height:8px;border-radius:4px;border:1px solid var(--line)}
 *{box-sizing:border-box}
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
   background:var(--bg);color:var(--text);font-size:14px;line-height:1.45}
@@ -15,7 +21,7 @@ button{font-family:inherit;cursor:pointer}
 .topbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 20px;display:flex;
   align-items:center;gap:16px;position:sticky;top:0;z-index:20}
 .topbar .logo{height:34px;display:block;cursor:pointer}
-.topbar .brand{font-weight:600;font-size:14px;color:var(--muted);padding-left:14px;border-left:1px solid var(--line)}
+.topbar .brand{font-weight:700;font-size:15px;color:var(--accent)}
 .topbar nav{display:flex;gap:4px;margin-left:10px}
 .topbar nav button{background:none;border:none;padding:8px 14px;border-radius:8px;color:var(--muted);font-weight:500}
 .topbar nav button.active{background:var(--bg);color:var(--text)}
@@ -28,8 +34,8 @@ button{font-family:inherit;cursor:pointer}
 .btn:hover{background:var(--orange-d)}
 .btn.sec{background:#fff;color:var(--text);border:1px solid var(--line)}
 .btn.sec:hover{background:var(--bg)}
-.btn.danger{background:#fff;color:var(--red);border:1px solid #f3c5c5}
-.btn.danger:hover{background:#fdecec}
+.btn.danger{background:#fff;color:var(--flag-red);border:1px solid #f0c7c3}
+.btn.danger:hover{background:#fcebea}
 .btn.sm{padding:5px 10px;font-size:12px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
@@ -53,7 +59,7 @@ textarea{resize:vertical;min-height:70px}
 /* tables */
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
-th{background:#fff7f2;font-weight:600;font-size:12px}
+th{background:#eef2fb;font-weight:600;font-size:12px}
 tr:hover td{background:#fafbfc}
 
 /* badges */
@@ -64,12 +70,12 @@ tr:hover td{background:#fafbfc}
 .b-Информативный,.b-Информативная{background:var(--blue)}
 .b-Критическая{background:var(--crit)}
 .chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px}
-.pill-role{font-size:11px;padding:2px 8px;border-radius:6px;background:#eef;color:#334;font-weight:600}
-.pill-role.admin{background:#ffe9df;color:#a3461f}
+.pill-role{font-size:11px;padding:2px 8px;border-radius:6px;background:#f0f1f4;color:#334;font-weight:600}
+.pill-role.admin{background:#e2e9f8;color:var(--accent-d)}
 
 /* login */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:
-  linear-gradient(135deg,#fff 0%,#fdf0e8 100%)}
+  linear-gradient(135deg,#fff 0%,#eaf0fb 100%)}
 .login-card{width:360px;padding:30px;background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.12)}
 .login-card h1{font-size:19px;margin:0 0 4px}
 .login-card p{color:var(--muted);margin:0 0 20px;font-size:13px}

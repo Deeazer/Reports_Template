@@ -14,7 +14,7 @@ export function renderLogin(onLogin) {
   login.addEventListener("keydown", onEnter); pass.addEventListener("keydown", onEnter);
   return h("div", { class: "login-wrap" },
     h("div", { class: "login-card" },
-      h("img", { src: "/img/logo.png", alt: "Business IT", style: { height: "44px", display: "block", margin: "0 auto 22px" } }),
+      h("div", { class: "flag-bar", style: { marginBottom: "22px" } }),
       h("h1", {}, "Вход в систему"),
       h("p", {}, "Генератор отчётов по тестированию на проникновение"),
       field("Логин", login),

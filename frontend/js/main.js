@@ -38,9 +38,9 @@ function shell(content) {
   const nav = h("nav", {}, navBtn("projects", "Проекты"));
   if (auth.isAdmin) { nav.append(navBtn("users", "Пользователи"), navBtn("settings", "Настройки")); }
   return h("div", {},
+    h("div", { class: "flag-bar" }),
     h("div", { class: "topbar" },
-      h("img", { src: "/img/logo.png", alt: "Business IT", class: "logo", onclick: () => navigate({ name: "projects" }) }),
-      h("div", { class: "brand" }, "Генератор отчётов"),
+      h("div", { class: "brand", onclick: () => navigate({ name: "projects" }), style: { cursor: "pointer", paddingLeft: 0, borderLeft: "none" } }, "Генератор отчётов"),
       nav,
       h("div", { class: "spacer" }),
       h("div", { class: "user" }, `${u.full_name} · ${u.role === "admin" ? "администратор" : "исполнитель"}`),
