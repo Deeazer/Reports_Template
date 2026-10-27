@@ -114,7 +114,7 @@ def _header_row(table, titles, widths=None):
 # ==========================================================================
 # ТИТУЛ + ЛИСТ СОГЛАСОВАНИЯ
 # ==========================================================================
-def _title_page(doc, p):
+def _title_page(doc, p, settings):
     for _ in range(2):
         doc.add_paragraph()
     t = doc.add_paragraph(); t.alignment = C
@@ -134,11 +134,21 @@ def _title_page(doc, p):
     t = _make_table(doc, 5)
     _header_row(t, ["Наименование организации", "Должность", "Фамилия, имя, отчество", "Подпись", "Дата"],
                 widths=[45, 35, 45, 25, 25])
-    for side in ("Со стороны Заказчика", "Со стороны Исполнителя"):
+    # подписанты вводятся в проекте; организация по умолчанию — Заказчик / Исполнитель из настроек
+    approvals = p.get("approvals") or []
+    default_org = {"client": p.get("client_name") or "",
+                   "executor": (settings.get("executor") or {}).get("name", "")}
+    for side, label in (("client", "Со стороны Заказчика"), ("executor", "Со стороны Исполнителя")):
         row = t.add_row()
-        H.fill_cell(row.cells[0], side, bold=True)
-        for c in row.cells[1:]:
-            H.fill_cell(c, "")
+        H.fill_cell(row.cells[0].merge(row.cells[4]), label, bold=True, italic=True)
+        people = [a for a in approvals if a.get("side") == side] or [{}]
+        for a in people:
+            row = t.add_row()
+            H.fill_cell(row.cells[0], a.get("org") or default_org[side])
+            H.fill_cell(row.cells[1], a.get("position", ""))
+            H.fill_cell(row.cells[2], a.get("name", ""))
+            H.fill_cell(row.cells[3], "")
+            H.fill_cell(row.cells[4], a.get("date", ""))
     doc.add_page_break()
 
 
@@ -181,8 +191,8 @@ def _section_general(doc, p, settings, summary):
         t = _make_table(doc, 3)
         _header_row(t, ["Преимущества", "Недостатки", "Общий уровень защищенности"], widths=[50, 95, 35])
         row = t.add_row()
-        H.fill_cell(row.cells[0], "")
-        dis = sec["disadvantages"] or ["Критичных недостатков не выявлено"]
+        H.fill_cell(row.cells[0], "", bullet_list=sec.get("advantages") or ["—"])
+        dis = sec["disadvantages"] or ["Недостатков не выявлено"]
         H.fill_cell(row.cells[1], "", bullet_list=dis)
         H.fill_cell(row.cells[2], sec["level"], bold=True, align=C,
                     bg=R.SECURITY_COLORS.get(sec["level"]))
@@ -327,16 +337,32 @@ def _section_summary(doc, p, summary, settings):
                                        "Уязвимости не добавлены", align=C, italic=True)
 
     if settings.get("report", {}).get("include_risk_stats", True):
+        H.new_paragraph(doc, "Распределение выявленных уязвимостей по уровням итогового риска и видам "
+                             "работ представлено в таблице 3.2.", align=L)
         H.caption(doc, "Таблица 3.2 – Количество выявленных уязвимостей по уровням риска")
-        t = _make_table(doc, 2)
-        _header_row(t, ["Уровень итогового риска", "Количество"], widths=[120, 60])
+        wts = [wt for wt in p["work_types"] if wt in R.WORK_TYPES]
+        t = _make_table(doc, len(wts) + 2)
+        first_w, total_w = 50, 25
+        col_w = (180 - first_w - total_w) / max(len(wts), 1)
+        _header_row(t, ["Уровень итогового риска"] + [R.WORK_TYPES[wt]["title"] for wt in wts] + ["Всего"],
+                    widths=[first_w] + [col_w] * len(wts) + [total_w])
+        by_wt = summary.get("counts_by_wt", {})
         for lvl in ["Высокий", "Средний", "Низкий", "Информативный"]:
             row = t.add_row()
             H.fill_cell(row.cells[0], lvl, bg=_risk_color(lvl))
-            H.fill_cell(row.cells[1], str(summary["counts"].get(lvl, 0)), align=C)
+            for i, wt in enumerate(wts):
+                H.fill_cell(row.cells[i + 1], str(by_wt.get(wt, {}).get(lvl, 0)), align=C)
+            H.fill_cell(row.cells[-1], str(summary["counts"].get(lvl, 0)), align=C, bold=True)
         row = t.add_row()
         H.fill_cell(row.cells[0], "Итого", bold=True)
-        H.fill_cell(row.cells[1], str(summary["total"]), bold=True, align=C)
+        for i, wt in enumerate(wts):
+            H.fill_cell(row.cells[i + 1], str(sum(by_wt.get(wt, {}).values())), bold=True, align=C)
+        H.fill_cell(row.cells[-1], str(sum(summary["counts"].values())), bold=True, align=C)
+        if summary.get("not_rated"):
+            n_nr = summary["not_rated"]
+            word = "уязвимости" if n_nr % 10 == 1 and n_nr % 100 != 11 else "уязвимостей"
+            H.new_paragraph(doc, f"Для {n_nr} {word} итоговый риск не определён (не заполнены критичность "
+                                 "или вероятность эксплуатации), в таблицу 3.2 они не включены.", align=L, italic=True)
 
 
 # ==========================================================================
@@ -452,9 +478,29 @@ def _appendix1(doc, p):
     doc.add_page_break()
     H.heading1(doc, "Приложение 1 – Границы исследования", None)
     H.new_paragraph(doc, "Исходная информация, предоставленная Заказчиком для проведения тестирования на "
-                         "проникновение (IP-адреса, FQDN, сетевые сегменты), приведена ниже.", align=L)
-    H.new_paragraph(doc, "[Таблицы с IP-адресами, FQDN и сетевыми сегментами заполняются по данным Заказчика.]",
-                    align=L, italic=True)
+                         "проникновение, приведена в таблицах ниже.", align=L)
+    scope = p.get("scope") or {}
+    tables = [
+        ("ips", "Таблица П1.{n} – IP-адреса", ["№", "IP-адрес / диапазон", "Описание"], ["address", "description"]),
+        ("fqdns", "Таблица П1.{n} – Доменные имена (FQDN)", ["№", "FQDN", "Описание"], ["name", "description"]),
+        ("segments", "Таблица П1.{n} – Сетевые сегменты", ["№", "Сетевой сегмент", "Назначение"], ["segment", "purpose"]),
+    ]
+    n = 0
+    for key, cap, headers, fields in tables:
+        rows = [r for r in (scope.get(key) or []) if any(str(r.get(f, "")).strip() for f in fields)]
+        if not rows:
+            continue
+        n += 1
+        H.caption(doc, cap.format(n=n))
+        t = _make_table(doc, 3)
+        _header_row(t, headers, widths=[12, 78, 90])
+        for i, r in enumerate(rows, 1):
+            row = t.add_row()
+            H.fill_cell(row.cells[0], str(i), align=C, size=10)
+            H.fill_cell(row.cells[1], r.get(fields[0], ""), size=10)
+            H.fill_cell(row.cells[2], r.get(fields[1], ""), size=10)
+    if not n:
+        H.new_paragraph(doc, "Границы исследования не заданы.", align=L, italic=True)
 
 
 def _appendix2(doc, p, settings):
@@ -611,7 +657,7 @@ def build_report(project, settings, upload_dir, img_map=None):
     H.setup_heading_styles(doc)
     summary = project["summary"]
 
-    _title_page(doc, project)
+    _title_page(doc, project, settings)
     # оглавление: заголовок страницы, поле TOC вставляется после сборки документа
     toc_title = doc.add_paragraph()
     toc_title.paragraph_format.first_line_indent = Mm(0)

@@ -222,14 +222,32 @@ def recompute_vuln(v: dict, settings_fstec=None) -> dict:
 # --------------------------------------------------------------------------
 # Сводные таблицы отчёта (считаются автоматически из набора уязвимостей)
 # --------------------------------------------------------------------------
-def summary_tables(vulns: list[dict], work_types: list[str]) -> dict:
+def _auto_advantages(ws_vulns: list[dict]) -> list[str]:
+    """Преимущества для таблиц 1.4.x, которые следуют из набора уязвимостей."""
+    risks = {v.get("final_risk") for v in ws_vulns}
+    sevs = {v.get("severity") for v in ws_vulns}
+    out = []
+    if not ws_vulns:
+        out.append("Уязвимостей не выявлено")
+        return out
+    if "Высокий" not in risks:
+        out.append("Не выявлено уязвимостей с высоким уровнем риска")
+    if "Критическая" not in sevs:
+        out.append("Не выявлено уязвимостей критического уровня опасности")
+    return out
+
+
+def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None) -> dict:
     """vulns — список уязвимостей с уже вычисленными производными полями.
 
     Возвращает данные для:
       - таблицы 3.1 (список уязвимостей по уровню риска);
       - таблицы 3.2 (количество по уровням риска);
       - таблиц 1.4.* (общий уровень защищенности) по видам работ.
+    security_notes — введённые в проекте преимущества по видам работ
+    ({work_type: {"advantages": [str]}}); дополняются автоматическими.
     """
+    security_notes = security_notes or {}
     ordered = sorted(
         vulns,
         key=lambda x: (RISK_ORDER.get(x.get("final_risk"), 4), SEV_ORDER.get(x.get("severity"), 5)),
@@ -252,10 +270,17 @@ def summary_tables(vulns: list[dict], work_types: list[str]) -> dict:
                      "ref": ref, "work_type": wt})
 
     counts = {lvl: 0 for lvl in R.RISK_LEVELS}
+    # распределение по уровням риска в разрезе видов работ (таблица 3.2)
+    counts_by_wt = {wt: {lvl: 0 for lvl in R.RISK_LEVELS} for wt in work_types}
+    not_rated = 0
     for v in vulns:
         r = v.get("final_risk")
         if r in counts:
             counts[r] += 1
+            if v.get("work_type") in counts_by_wt:
+                counts_by_wt[v["work_type"]][r] += 1
+        else:
+            not_rated += 1
 
     # общий уровень защищенности: Низкий, если есть Высокий риск; Средний — если Средний; иначе Высокий
     def security_level(ws_vulns):
@@ -269,18 +294,27 @@ def summary_tables(vulns: list[dict], work_types: list[str]) -> dict:
     security = {}
     for wt in work_types:
         ws_vulns = [v for v in vulns if v.get("work_type") == wt]
-        disadvantages = [v.get("title") for v in sorted(
-            ws_vulns, key=lambda x: (RISK_ORDER.get(x.get("final_risk"), 4),))]
+        # недостатки — все уязвимости, кроме информативных, по убыванию риска
+        disadvantages = [(v.get("title") or "Без названия")
+                         + (f" (риск: {v['final_risk'].lower()})" if v.get("final_risk") else "")
+                         for v in sorted(ws_vulns, key=lambda x: (RISK_ORDER.get(x.get("final_risk"), 4),
+                                                                  SEV_ORDER.get(x.get("severity"), 5)))
+                         if v.get("final_risk") != "Информативный"]
+        manual = [a.strip() for a in (security_notes.get(wt, {}).get("advantages") or []) if str(a).strip()]
         security[wt] = {
             "title": R.WORK_TYPES[wt]["summary_title"],
             "level": security_level(ws_vulns),
             "disadvantages": disadvantages,
+            "advantages": manual + _auto_advantages(ws_vulns),
+            "manual_advantages": manual,
             "count": len(ws_vulns),
         }
 
     return {
         "rows": rows,
         "counts": counts,
+        "counts_by_wt": counts_by_wt,
+        "not_rated": not_rated,
         "total": len(vulns),
         "security": security,
         "section_no": section_no,

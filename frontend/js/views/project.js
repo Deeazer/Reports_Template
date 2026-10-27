@@ -31,8 +31,10 @@ export async function renderProject(pid) {
   // tabs
   const tabs = [
     { key: "general", label: "Общие данные" },
+    { key: "scope", label: "Границы (Прил. 1)" },
     { key: "model", label: "Модель угроз" },
     ...p.work_types.map(wt => ({ key: "wt_" + wt, label: ref.work_types[wt].title })),
+    { key: "results", label: "Итоги (1.4, 3)" },
     { key: "tools", label: "Инструментарий" },
   ];
   // список пользователей доступен только администратору, поэтому и вкладка — только ему
@@ -56,6 +58,12 @@ export async function renderProject(pid) {
       // обновляем проект, чтобы предпросмотр актуальных угроз (1.8.3) был свежим
       try { Object.assign(p, await api.project(p.id)); } catch {}
       content.replaceChildren(modelTab(p, ref, save));
+    }
+    else if (key === "scope") content.append(scopeTab(p, save));
+    else if (key === "results") {
+      // сводки считаются на сервере по текущим уязвимостям
+      try { Object.assign(p, await api.project(p.id)); } catch {}
+      content.replaceChildren(resultsTab(p, ref, save));
     }
     else if (key === "tools") content.append(toolsTab(p, save));
     else if (key === "access") content.append(accessTab(p, users, save));
@@ -105,7 +113,96 @@ function generalTab(p, ref, upd) {
       field("Период работ — по", h("input", { value: p.period_to, placeholder: "21.10.2026", oninput: e => upd("period_to")(e.target.value) }))),
     field("Реквизиты Заказчика (п. 1.6)", h("textarea", { oninput: e => upd("client_requisites")(e.target.value) }, p.client_requisites || "")),
     executorsEditor(p, upd),
+    approvalsEditor(p, upd),
   );
+}
+
+// Лист согласования на титульном листе
+function approvalsEditor(p, upd) {
+  const box = h("div", {});
+  const sides = [{ value: "client", label: "Заказчик" }, { value: "executor", label: "Исполнитель" }];
+  const changed = () => upd("approvals")(p.approvals);
+  const render = () => {
+    box.replaceChildren();
+    (p.approvals || []).forEach((a, i) => {
+      box.append(h("div", { class: "row", style: { marginBottom: "6px" } },
+        select(sides, a.side, v => { a.side = v; changed(); }),
+        h("input", { value: a.org || "", placeholder: "Организация (по умолчанию — из проекта/настроек)", oninput: e => { a.org = e.target.value; changed(); } }),
+        h("input", { value: a.position || "", placeholder: "Должность", oninput: e => { a.position = e.target.value; changed(); } }),
+        h("input", { value: a.name || "", placeholder: "Ф.И.О.", oninput: e => { a.name = e.target.value; changed(); } }),
+        h("input", { value: a.date || "", placeholder: "Дата", style: { maxWidth: "120px" }, oninput: e => { a.date = e.target.value; changed(); } }),
+        h("button", { class: "btn danger sm", onclick: () => { p.approvals.splice(i, 1); changed(); render(); } }, "×")));
+    });
+    if (!(p.approvals || []).length) box.append(h("div", { class: "muted", style: { fontSize: "12px" } }, "Не заполнено — в отчёте будут пустые строки для подписей."));
+  };
+  render();
+  return h("div", {}, h("div", { class: "between", style: { margin: "14px 0 6px" } },
+    h("span", { style: { fontWeight: 600, fontSize: "12px", color: "var(--muted)" } }, "ЛИСТ СОГЛАСОВАНИЯ (титульный лист)"),
+    h("button", { class: "btn sec sm", onclick: () => { (p.approvals = p.approvals || []).push({ side: "client", org: "", position: "", name: "", date: "" }); changed(); render(); } }, "+ Подписант")),
+    box);
+}
+
+// ---------- Границы исследования (Приложение 1) ----------
+function scopeTab(p, save) {
+  p.scope = p.scope || {};
+  for (const k of ["ips", "fqdns", "segments"]) p.scope[k] = p.scope[k] || [];
+  const onSave = () => save({ scope: p.scope });
+  return h("div", {},
+    h("p", { class: "muted" }, "Данные выводятся в Приложение 1 отчёта. Пустые таблицы в отчёт не попадают."),
+    jsonTable("IP-адреса и диапазоны", p.scope.ips, [["address", "IP-адрес / диапазон"], ["description", "Описание"]],
+      { address: "", description: "" }, onSave),
+    jsonTable("Доменные имена (FQDN)", p.scope.fqdns, [["name", "FQDN"], ["description", "Описание"]],
+      { name: "", description: "" }, onSave),
+    jsonTable("Сетевые сегменты", p.scope.segments, [["segment", "Сетевой сегмент"], ["purpose", "Назначение"]],
+      { segment: "", purpose: "" }, onSave),
+  );
+}
+
+// ---------- Итоги: таблицы 1.4.x и раздел 3 (считаются по уязвимостям) ----------
+const SECURITY_STYLE = { "Низкий": "var(--red)", "Средний": "var(--yellow)", "Высокий": "var(--green)" };
+
+function resultsTab(p, ref, save) {
+  const sum = p.summary || {};
+  const wrap = h("div", {});
+  p.security_notes = p.security_notes || {};
+  (p.work_types || []).forEach((wt, i) => {
+    const sec = (sum.security || {})[wt];
+    if (!sec) return;
+    const notes = p.security_notes[wt] = p.security_notes[wt] || { advantages: [] };
+    const auto = sec.advantages.slice(sec.manual_advantages.length);
+    const lvl = h("span", { class: "stat", style: { background: SECURITY_STYLE[sec.level], color: sec.level === "Средний" ? "#333" : "#fff" } }, sec.level);
+    wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+      h("div", { class: "between" }, h("b", {}, `Таблица 1.4.${i + 1} – ${sec.title}`), h("span", {}, "Общий уровень защищенности: ", lvl)),
+      h("div", { class: "cols2", style: { marginTop: "10px" } },
+        h("div", {},
+          field("Преимущества (вводятся вручную, по одному в строке)",
+            h("textarea", { oninput: e => { notes.advantages = e.target.value.split("\n"); save({ security_notes: p.security_notes }); } },
+              (notes.advantages || []).join("\n"))),
+          auto.length ? h("div", { class: "muted", style: { fontSize: "12px" } }, "Добавляются автоматически: " + auto.join("; ")) : ""),
+        h("div", {},
+          h("div", { style: { fontWeight: 600, fontSize: "12px", color: "var(--muted)", marginBottom: "6px" } }, "НЕДОСТАТКИ (из уязвимостей)"),
+          sec.disadvantages.length ? h("ol", { style: { margin: 0, paddingLeft: "18px" } }, ...sec.disadvantages.map(d => h("li", {}, d)))
+            : h("div", { class: "muted" }, "Недостатков не выявлено"))),
+    ));
+  });
+  // таблица 3.1
+  const t31 = h("table");
+  t31.append(h("tr", {}, ...["Уязвимость", "Итоговый риск", "Ссылка в отчёте"].map(x => h("th", {}, x))));
+  (sum.rows || []).forEach(r => t31.append(h("tr", {}, h("td", {}, r.title), h("td", {}, badge(r.final_risk)), h("td", {}, r.ref))));
+  if (!(sum.rows || []).length) t31.append(h("tr", {}, h("td", { colspan: 3, class: "muted" }, "Уязвимости не добавлены")));
+  // таблица 3.2
+  const levels = ["Высокий", "Средний", "Низкий", "Информативный"];
+  const t32 = h("table");
+  t32.append(h("tr", {}, h("th", {}, "Уровень риска"), ...p.work_types.map(wt => h("th", {}, ref.work_types[wt].title)), h("th", {}, "Всего")));
+  levels.forEach(l => t32.append(h("tr", {}, h("td", {}, badge(l)),
+    ...p.work_types.map(wt => h("td", {}, String(((sum.counts_by_wt || {})[wt] || {})[l] || 0))),
+    h("td", {}, h("b", {}, String((sum.counts || {})[l] || 0))))));
+  wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+    h("b", {}, "Таблица 3.1 – Обнаруженные уязвимости по уровню риска"), h("div", { style: { marginTop: "8px" } }, t31)));
+  wrap.append(h("div", { class: "card pad" },
+    h("b", {}, "Таблица 3.2 – Количество уязвимостей по уровням риска"), h("div", { style: { marginTop: "8px" } }, t32),
+    sum.not_rated ? h("p", { class: "muted", style: { fontSize: "12px" } }, `Без итогового риска (не заполнены CVSS или вероятность): ${sum.not_rated}. В таблицу 3.2 не входят.`) : ""));
+  return wrap;
 }
 
 function executorsEditor(p, upd) {

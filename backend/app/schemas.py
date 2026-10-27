@@ -82,6 +82,9 @@ class ProjectUpdate(BaseModel):
     threats: Optional[list[dict]] = None
     tools: Optional[list[dict]] = None
     executors: Optional[list[dict]] = None
+    scope: Optional[dict] = None
+    approvals: Optional[list[dict]] = None
+    security_notes: Optional[dict] = None
     member_ids: Optional[list[int]] = None
 
 

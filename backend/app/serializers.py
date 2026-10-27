@@ -56,6 +56,9 @@ def project_dict(p: "models.Project", with_vulns=True, settings_fstec=None) -> d
         "threats": p.threats or [],
         "tools": p.tools or [],
         "executors": p.executors or [],
+        "scope": p.scope or {},
+        "approvals": p.approvals or [],
+        "security_notes": p.security_notes or {},
         "member_ids": [m.user_id for m in p.members],
         "created_by": p.created_by,
         "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -64,7 +67,7 @@ def project_dict(p: "models.Project", with_vulns=True, settings_fstec=None) -> d
     if with_vulns:
         vulns = [vuln_dict(v, settings_fstec) for v in p.vulns]
         d["vulns"] = vulns
-        d["summary"] = scoring.summary_tables(vulns, p.work_types or [])
+        d["summary"] = scoring.summary_tables(vulns, p.work_types or [], p.security_notes or {})
         for v in vulns:
             # угрозы, которые будут подобраны, если в карточке ничего не отмечено
             v["auto_threat_codes"] = scoring.auto_threat_codes(v, p.threats or [])

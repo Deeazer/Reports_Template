@@ -43,6 +43,11 @@ class Project(Base):
     threats = Column(JSON, default=list)
     tools = Column(JSON, default=list)
     executors = Column(JSON, default=list)                 # [{org,position,name}]
+    # Приложение 1: {"ips": [{address, description}], "fqdns": [{name, description}],
+    #                "segments": [{segment, purpose}]}
+    scope = Column(JSON, default=dict)
+    approvals = Column(JSON, default=list)                 # лист согласования [{side,org,position,name,date}]
+    security_notes = Column(JSON, default=dict)            # 1.4.x: {work_type: {"advantages": [str]}}
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
