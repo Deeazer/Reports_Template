@@ -119,6 +119,10 @@ def delete_user(uid: int, db: Session = Depends(get_db),
         raise HTTPException(404, "Не найдено")
     if u.id == admin.id:
         raise HTTPException(400, "Нельзя удалить самого себя")
+    # проекты пользователя остаются: снимаем назначения и авторство,
+    # иначе внешние ключи не дадут удалить запись
+    db.query(models.ProjectMember).filter_by(user_id=u.id).delete()
+    db.query(models.Project).filter_by(created_by=u.id).update({"created_by": None})
     db.delete(u); db.commit()
     return {"ok": True}
 
@@ -201,6 +205,7 @@ def list_projects(db: Session = Depends(get_db), user: models.User = Depends(cur
             "id": d["id"], "name": d["name"], "client_name": d["client_name"],
             "work_types": d["work_types"], "status": d["status"],
             "updated_at": d["updated_at"], "vuln_count": len(d["vulns"]),
+            "created_by": d["created_by"],
             "counts": d["summary"]["counts"],
         })
     return result
@@ -257,13 +262,26 @@ def update_project(pid: int, data: schemas.ProjectUpdate, db: Session = Depends(
     return serializers.project_dict(p, settings_fstec=fstec_settings(db))
 
 
+def _remove_upload_files(filenames):
+    """Удаляет файлы скриншотов с диска (после удаления записей из БД)."""
+    for fname in filenames:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, fname))
+        except OSError:
+            pass
+
+
 @app.delete("/api/projects/{pid}")
 def delete_project(pid: int, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
     p = _load_project(db, pid, user)
     if user.role != "admin" and p.created_by != user.id:
         raise HTTPException(403, "Удалять проект может администратор или его создатель")
+    files = [im.filename for v in p.vulns for im in v.images]
+    vulns = len(p.vulns)
     db.delete(p); db.commit()
-    return {"ok": True}
+    # файлы удаляются только после успешного удаления записей
+    _remove_upload_files(files)
+    return {"ok": True, "deleted": {"vulns": vulns, "images": len(files)}}
 
 
 # --------------------------------------------------------------------------
@@ -300,7 +318,9 @@ def delete_vuln(vid: int, db: Session = Depends(get_db), user: models.User = Dep
     if not v:
         raise HTTPException(404, "Не найдено")
     _load_project(db, v.project_id, user)
+    files = [im.filename for im in v.images]
     db.delete(v); db.commit()
+    _remove_upload_files(files)
     return {"ok": True}
 
 

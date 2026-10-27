@@ -1,6 +1,6 @@
 import { api, auth } from "../api.js";
 import { state, navigate } from "../main.js";
-import { h, field, select, toast, confirmModal, badge, debouncePatch } from "../ui.js";
+import { h, field, select, toast, confirmModal, confirmTyped, badge, debouncePatch } from "../ui.js";
 import { vulnCard } from "./vuln.js";
 
 export async function renderProject(pid) {
@@ -25,7 +25,7 @@ export async function renderProject(pid) {
     h("div", { class: "row" },
       h("button", { class: "btn sec", onclick: () => doDownload(p) }, "⭳ Скачать отчёт (.docx)"),
       (auth.isAdmin || p.created_by === auth.user.id) &&
-        h("button", { class: "btn danger", onclick: () => confirmModal("Удалить проект целиком?", async () => { try { await api.deleteProject(pid); navigate({ name: "projects" }); } catch (e) { toast(e.message, true); } }) }, "Удалить проект"),
+        h("button", { class: "btn danger", onclick: () => deleteProject(p, () => navigate({ name: "projects" })) }, "Удалить проект"),
     )));
 
   // tabs
@@ -63,6 +63,20 @@ export async function renderProject(pid) {
   }
   setTab(active);
   return wrap;
+}
+
+// Удаление проекта со всеми уязвимостями и скриншотами (общая для списка и страницы проекта)
+export function deleteProject(p, onDone) {
+  const n = p.vuln_count ?? (p.vulns || []).length;
+  confirmTyped(`Удалить проект «${p.name}»? Вместе с ним будут удалены уязвимости (${n}) и все загруженные скриншоты.`,
+    p.name, async () => {
+      try {
+        const r = await api.deleteProject(p.id);
+        const d = (r && r.deleted) || {};
+        toast(`Проект удалён: уязвимостей ${d.vulns ?? 0}, скриншотов ${d.images ?? 0}`);
+        onDone && onDone();
+      } catch (e) { toast(e.message, true); }
+    });
 }
 
 async function doDownload(p) {

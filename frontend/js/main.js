@@ -51,8 +51,10 @@ function shell(content) {
 export async function render() {
   const el = root();
   clear(el);
-  if (!auth.token) { el.append(renderLogin(onLogin)); return; }
+  if (!auth.token || !auth.user) { el.append(renderLogin(onLogin)); return; }
   if (!state.ref) { try { state.ref = await api.refdata(); } catch (e) { toast(e.message, true); } }
+  // за время запроса сессия могла завершиться (выход в другой вкладке)
+  if (!auth.token || !auth.user) { clear(el); el.append(renderLogin(onLogin)); return; }
   const r = state.route;
   const slot = h("div", {}, h("div", { class: "empty" }, "Загрузка…"));
   el.append(shell(slot));

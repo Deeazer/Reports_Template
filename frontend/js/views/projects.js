@@ -1,6 +1,7 @@
 import { api, auth } from "../api.js";
 import { state, navigate } from "../main.js";
 import { h, field, toast, confirmModal, badge } from "../ui.js";
+import { deleteProject } from "./project.js";
 
 export async function renderProjects() {
   const projects = await api.projects();
@@ -28,6 +29,9 @@ export async function renderProjects() {
     const card = h("div", { class: "card pad", style: { cursor: "pointer" }, onclick: () => navigate({ name: "project", id: p.id }) },
       h("div", { class: "between" },
         h("div", { style: { fontWeight: 700, fontSize: "15px" } }, p.name),
+        (auth.isAdmin || p.created_by === auth.user.id) &&
+          h("button", { class: "btn danger sm", title: "Удалить проект",
+            onclick: (e) => { e.stopPropagation(); deleteProject(p, () => card.remove()); } }, "Удалить"),
       ),
       h("div", { class: "muted", style: { marginTop: "4px" } }, p.client_name || "—"),
       h("div", { class: "row", style: { marginTop: "8px" } },

@@ -41,6 +41,24 @@ export function select(options, value, onChange, opts = {}) {
   return sel;
 }
 
+// Подтверждение необратимого удаления: кнопка активна, только когда
+// введено точное значение expected (например, название проекта).
+export function confirmTyped(message, expected, onYes) {
+  const bg = h("div", { class: "modal-bg" });
+  const close = () => bg.remove();
+  const btn = h("button", { class: "btn danger", disabled: true, onclick: () => { close(); onYes(); } }, "Удалить навсегда");
+  const inp = h("input", { placeholder: expected, oninput: e => { btn.disabled = e.target.value.trim() !== expected.trim(); } });
+  bg.append(h("div", { class: "modal" },
+    h("p", {}, message),
+    h("p", { class: "muted", style: { fontSize: "13px" } }, "Действие необратимо. Для подтверждения введите: ", h("b", {}, expected)),
+    inp,
+    h("div", { class: "row", style: { justifyContent: "flex-end", marginTop: "16px" } },
+      h("button", { class: "btn sec", onclick: close }, "Отмена"), btn)));
+  bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
+  document.body.append(bg);
+  inp.focus();
+}
+
 export function confirmModal(message, onYes) {
   const bg = h("div", { class: "modal-bg" });
   const close = () => bg.remove();
