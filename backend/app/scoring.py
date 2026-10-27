@@ -237,7 +237,94 @@ def _auto_advantages(ws_vulns: list[dict]) -> list[str]:
     return out
 
 
-def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None) -> dict:
+# --------------------------------------------------------------------------
+# Социотехническое тестирование: сводная статистика по целевой группе
+# --------------------------------------------------------------------------
+SOCIAL_ACTIONS = [
+    ("opened", "открыл сообщение"),
+    ("clicked", "перешёл по ссылке"),
+    ("submitted", "ввёл учётные данные"),
+    ("reported", "сообщил в службу ИБ"),
+]
+
+
+def _pct(n, total):
+    return round(100 * n / total) if total else 0
+
+
+def social_stats(social: dict | None) -> dict:
+    """Считает итоги по целевой группе: всего, открыли, перешли, ввели данные, сообщили.
+
+    Переход по ссылке подразумевает открытие сообщения, ввод данных — переход,
+    поэтому старшее действие засчитывается и в младших.
+    """
+    social = social or {}
+    scenarios = social.get("scenarios") or []
+    names = {sc.get("id"): (sc.get("name") or f"Сценарий {i}") for i, sc in enumerate(scenarios, 1)}
+
+    def norm(t):
+        sub = bool(t.get("submitted"))
+        clk = sub or bool(t.get("clicked"))
+        return {"opened": clk or bool(t.get("opened")), "clicked": clk, "submitted": sub,
+                "reported": bool(t.get("reported"))}
+
+    targets = [t for t in (social.get("targets") or []) if str(t.get("contact", "")).strip()]
+
+    def agg(items):
+        total = len(items)
+        out = {"total": total}
+        for key, _ in SOCIAL_ACTIONS:
+            n = sum(1 for t in items if norm(t)[key])
+            out[key] = n
+            out[key + "_pct"] = _pct(n, total)
+        return out
+
+    by_scenario = []
+    for sc in scenarios:
+        items = [t for t in targets if t.get("scenario") == sc.get("id")]
+        by_scenario.append({"id": sc.get("id"), "name": names[sc.get("id")], **agg(items)})
+    unassigned = [t for t in targets if t.get("scenario") not in names]
+    if unassigned:
+        by_scenario.append({"id": None, "name": "Сценарий не указан", **agg(unassigned)})
+
+    affected = []
+    for t in targets:
+        n = norm(t)
+        acts = [label for key, label in SOCIAL_ACTIONS if n[key] and key != "opened"]
+        if n["clicked"] or n["submitted"]:
+            affected.append({"contact": t.get("contact", "").strip(),
+                             "scenario": names.get(t.get("scenario"), ""),
+                             "actions": ", ".join(acts)})
+    return {**agg(targets), "by_scenario": by_scenario, "affected": affected}
+
+
+def social_security(stats: dict) -> tuple[str, list[str], list[str]]:
+    """Уровень защищенности, недостатки и автоматические преимущества для таблицы 1.4.x."""
+    total = stats.get("total", 0)
+    if not total:
+        return "Не определён", [], []
+    clicked, submitted = stats["clicked_pct"], stats["submitted_pct"]
+    if submitted >= 10 or clicked >= 30:
+        level = "Низкий"
+    elif stats["submitted"] or stats["clicked"]:
+        level = "Средний"
+    else:
+        level = "Высокий"
+    dis, adv = [], []
+    if stats["clicked"]:
+        dis.append(f"Из исследуемой группы {clicked}% перешли по ссылке"
+                   + (f", {submitted}% ввели учётные данные" if stats["submitted"] else ""))
+    else:
+        adv.append("Сотрудники не переходили по ссылкам из сообщений")
+    if not stats["submitted"]:
+        adv.append("Сотрудники не вводили учётные данные на поддельных ресурсах")
+    if stats["reported"]:
+        adv.append(f"О подозрительном сообщении в службу ИБ сообщили {stats['reported']} из {total}")
+    return level, dis, adv
+
+
+def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None,
+                   social: dict | None = None) -> dict:
     """vulns — список уязвимостей с уже вычисленными производными полями.
 
     Возвращает данные для:
@@ -293,6 +380,13 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
 
     security = {}
     for wt in work_types:
+        manual = [a.strip() for a in (security_notes.get(wt, {}).get("advantages") or []) if str(a).strip()]
+        if R.WORK_TYPES[wt].get("kind") == "social":
+            level, dis, auto_adv = social_security(social or {})
+            security[wt] = {"title": R.WORK_TYPES[wt]["summary_title"], "level": level,
+                            "disadvantages": dis, "advantages": manual + auto_adv,
+                            "manual_advantages": manual, "count": (social or {}).get("total", 0)}
+            continue
         ws_vulns = [v for v in vulns if v.get("work_type") == wt]
         # недостатки — все уязвимости, кроме информативных, по убыванию риска
         disadvantages = [(v.get("title") or "Без названия")
@@ -300,7 +394,6 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
                          for v in sorted(ws_vulns, key=lambda x: (RISK_ORDER.get(x.get("final_risk"), 4),
                                                                   SEV_ORDER.get(x.get("severity"), 5)))
                          if v.get("final_risk") != "Информативный"]
-        manual = [a.strip() for a in (security_notes.get(wt, {}).get("advantages") or []) if str(a).strip()]
         security[wt] = {
             "title": R.WORK_TYPES[wt]["summary_title"],
             "level": security_level(ws_vulns),
@@ -357,7 +450,11 @@ def auto_threat_codes(v: dict, threat_catalog: list[dict]) -> list[str]:
     return [by_bdu[b] for b in wanted if b in by_bdu]
 
 
-def actual_threats(vulns: list[dict], threat_catalog: list[dict], interfaces: list[dict] | None = None) -> list[dict]:
+SOCIAL_BDU = "УБИ.175"   # Угроза «фишинга»
+
+
+def actual_threats(vulns: list[dict], threat_catalog: list[dict], interfaces: list[dict] | None = None,
+                   social_stats: dict | None = None) -> list[dict]:
     """Строит строки таблицы 1.8.3 из уязвимостей.
 
     Угрозы уязвимости — отмеченные в карточке вручную, а если не отмечено ничего,
@@ -389,6 +486,21 @@ def actual_threats(vulns: list[dict], threat_catalog: list[dict], interfaces: li
             a["auto"] = a["auto"] or not manual
             if v.get("title"):
                 a["vulns"].append(v["title"])
+    # социотехническое тестирование: если сотрудники переходили по ссылкам или
+    # вводили данные, актуальна угроза фишинга (по каталогу проекта)
+    if social_stats and (social_stats.get("clicked") or social_stats.get("submitted")):
+        code = next((t.get("code") for t in (threat_catalog or [])
+                     if (t.get("bdu") or "").strip().upper() == SOCIAL_BDU), None)
+        if code:
+            if code not in agg:
+                agg[code] = {"interfaces": set(), "intruders": set(), "vulns": [], "auto": True}
+                order.append(code)
+            a = agg[code]
+            allowed = _interfaces_for("social", interfaces) if interfaces is not None else None
+            cat_intf = _split_codes(catalog.get(code, {}).get("interfaces"))
+            a["interfaces"].update(c for c in cat_intf if allowed is None or c in allowed)
+            a["intruders"].update(R.WORK_TYPES["social"]["default_intruders"])
+            a["vulns"].append("Социотехническое тестирование")
     rows = []
     # сохраняем порядок каталога, затем угрозы, которых нет в каталоге
     seq = [c for c in (t.get("code") for t in (threat_catalog or [])) if c in agg]

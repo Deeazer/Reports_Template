@@ -109,3 +109,8 @@ tr:hover td{background:#fafbfc}
 .imgs .ic img{width:100%;display:block;height:80px;object-fit:cover}
 .imgs .ic .cap{padding:4px;font-size:10px}
 .imgs .ic .cap input{font-size:10px;padding:2px 4px}
+.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px}
+.meta{font-size:12px;color:var(--muted)}
+.meta b{font-weight:600;color:var(--text,#333)}
+.hist td{font-size:13px;vertical-align:top}
+@media (max-width:700px){.cols3{grid-template-columns:1fr}}

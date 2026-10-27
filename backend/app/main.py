@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+from datetime import datetime
 from urllib.parse import quote
 from fastapi import (FastAPI, Depends, HTTPException, status, UploadFile, File,
                      Form, Response, Body)
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from .db import Base, engine, get_db
-from . import models, schemas, refdata, security, serializers, scoring
+from . import models, schemas, refdata, security, serializers, scoring, audit
 from .crud_settings import get_all_settings, set_setting, fstec_settings
 from .security import (current_user, require_admin, can_access_project,
                        hash_password, verify_password, create_token)
@@ -67,7 +68,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     if not user or not verify_password(form.password, user.password_hash) or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль")
     return schemas.Token(access_token=create_token(user), id=user.id, role=user.role,
-                         full_name=user.full_name or user.login, login=user.login)
+                         full_name=user.short_name, login=user.login)
 
 
 @app.get("/api/auth/me", response_model=schemas.UserOut)
@@ -83,6 +84,23 @@ def list_users(db: Session = Depends(get_db), _: models.User = Depends(require_a
     return db.query(models.User).order_by(models.User.id).all()
 
 
+def _apply_name(u, last=None, first=None, middle=None, full=None):
+    """Части ФИО задаются отдельно; full_name собирается из них.
+    Если пришло только full_name (старый клиент), оно раскладывается по пробелам."""
+    if last is None and first is None and middle is None and full is not None:
+        parts = full.split()
+        if len(parts) >= 2:
+            last, first, middle = parts[0], parts[1], " ".join(parts[2:])
+        else:
+            u.last_name = u.first_name = u.middle_name = ""
+            u.full_name = full.strip()
+            return
+    if last is not None: u.last_name = last.strip()
+    if first is not None: u.first_name = first.strip()
+    if middle is not None: u.middle_name = middle.strip()
+    u.compose_full_name()
+
+
 @app.post("/api/users", response_model=schemas.UserOut)
 def create_user(data: schemas.UserCreate, db: Session = Depends(get_db),
                 _: models.User = Depends(require_admin)):
@@ -90,8 +108,13 @@ def create_user(data: schemas.UserCreate, db: Session = Depends(get_db),
         raise HTTPException(400, "Пользователь с таким логином уже существует")
     if data.role not in ("admin", "executor"):
         raise HTTPException(400, "Недопустимая роль")
-    u = models.User(login=data.login, full_name=data.full_name, position=data.position,
+    u = models.User(login=data.login, position=data.position,
                     role=data.role, password_hash=hash_password(data.password))
+    has_parts = data.last_name or data.first_name or data.middle_name
+    _apply_name(u, *( (data.last_name, data.first_name, data.middle_name, None) if has_parts
+                      else (None, None, None, data.full_name)))
+    if not u.full_name:
+        raise HTTPException(400, "Укажите фамилию и имя пользователя")
     db.add(u); db.commit(); db.refresh(u)
     return u
 
@@ -102,7 +125,10 @@ def update_user(uid: int, data: schemas.UserUpdate, db: Session = Depends(get_db
     u = db.get(models.User, uid)
     if not u:
         raise HTTPException(404, "Не найдено")
-    if data.full_name is not None: u.full_name = data.full_name
+    if any(x is not None for x in (data.last_name, data.first_name, data.middle_name, data.full_name)):
+        _apply_name(u, data.last_name, data.first_name, data.middle_name, data.full_name)
+        if not u.full_name:
+            raise HTTPException(400, "Укажите фамилию и имя пользователя")
     if data.position is not None: u.position = data.position
     if data.role is not None: u.role = data.role
     if data.is_active is not None: u.is_active = data.is_active
@@ -123,6 +149,12 @@ def delete_user(uid: int, db: Session = Depends(get_db),
     # иначе внешние ключи не дадут удалить запись
     db.query(models.ProjectMember).filter_by(user_id=u.id).delete()
     db.query(models.Project).filter_by(created_by=u.id).update({"created_by": None})
+    db.query(models.Project).filter_by(updated_by=u.id).update({"updated_by": None})
+    db.query(models.Vulnerability).filter_by(created_by=u.id).update({"created_by": None})
+    db.query(models.Vulnerability).filter_by(updated_by=u.id).update({"updated_by": None})
+    db.query(models.ProjectImage).filter_by(created_by=u.id).update({"created_by": None})
+    # в журнале остаётся снимок имени, ссылка на пользователя снимается
+    db.query(models.AuditEntry).filter_by(user_id=u.id).update({"user_id": None})
     db.delete(u); db.commit()
     return {"ok": True}
 
@@ -162,6 +194,7 @@ def read_refdata(_: models.User = Depends(current_user)):
         "fstec": refdata.DEFAULT_SETTINGS["fstec"],
         "colors": refdata.COLORS,
         "cvss_metrics": _cvss_options(),
+        "owasp_top10": refdata.OWASP_TOP10,
     }
 
 
@@ -206,6 +239,9 @@ def list_projects(db: Session = Depends(get_db), user: models.User = Depends(cur
             "work_types": d["work_types"], "status": d["status"],
             "updated_at": d["updated_at"], "vuln_count": len(d["vulns"]),
             "created_by": d["created_by"],
+            "created_by_name": d["created_by_name"],
+            "updated_by_name": d["updated_by_name"],
+            "created_at": d["created_at"],
             "counts": d["summary"]["counts"],
         })
     return result
@@ -222,7 +258,7 @@ def create_project(data: schemas.ProjectCreate, db: Session = Depends(get_db),
         name=data.name, client_name=data.client_name,
         work_types=work_types, test_methods=data.test_methods,
         tech_sites=refdata.DEFAULT_TECH_SITES,
-        client_requisites="", created_by=user.id,
+        client_requisites="", created_by=user.id, updated_by=user.id,
         intruders=s.get("intruders", refdata.DEFAULT_INTRUDERS),
         # в проект копируются ВСЕ интерфейсы и весь каталог угроз;
         # интерфейсы редактируются вручную, актуальные угрозы (1.8.3)
@@ -232,7 +268,9 @@ def create_project(data: schemas.ProjectCreate, db: Session = Depends(get_db),
         tools=s.get("tools", refdata.DEFAULT_TOOLS),
         executors=[],
     )
-    db.add(p); db.commit(); db.refresh(p)
+    db.add(p); db.flush()
+    audit.log(db, user, p.id, "project", p.id, "create", p.name)
+    db.commit(); db.refresh(p)
     return serializers.project_dict(p, settings_fstec=fstec_settings(db))
 
 
@@ -252,14 +290,56 @@ def update_project(pid: int, data: schemas.ProjectUpdate, db: Session = Depends(
         payload["work_types"] = refdata.enabled_work_types(payload["work_types"])
         if not payload["work_types"]:
             raise HTTPException(400, "Выберите хотя бы один доступный вид работ")
+        added = set(payload["work_types"]) - set(p.work_types or [])
+        if added and "interfaces" not in payload:
+            payload["interfaces"] = _tag_interfaces(p.interfaces or [], added)
+    changed = [k for k, v in payload.items() if getattr(p, k) != v]
     for k, v in payload.items():
         setattr(p, k, v)
     if member_ids is not None and (user.role == "admin" or p.created_by == user.id):
+        old = {m.user_id for m in p.members}
+        if old != set(member_ids):
+            changed.append("member_ids")
         db.query(models.ProjectMember).filter_by(project_id=p.id).delete()
         for mid in member_ids:
             db.add(models.ProjectMember(project_id=p.id, user_id=mid))
+    if changed:
+        _touch(p, user)
+        audit.log(db, user, p.id, "project", p.id, "update", p.name, changed)
     db.commit(); db.refresh(p)
     return serializers.project_dict(p, settings_fstec=fstec_settings(db))
+
+
+def _tag_interfaces(interfaces, added_work_types):
+    """При добавлении вида работ в проект отмечает его у интерфейсов проекта,
+    которые относятся к нему в каталоге по умолчанию (по коду интерфейса)."""
+    defaults = {i["code"]: set(i.get("work_types") or []) for i in refdata.DEFAULT_INTERFACES}
+    out = []
+    for i in interfaces:
+        i = dict(i)
+        wts = list(i.get("work_types") or [])
+        for wt in added_work_types:
+            if wt in defaults.get(i.get("code"), set()) and wt not in wts:
+                wts.append(wt)
+        if i.get("work_types") is not None or wts:
+            i["work_types"] = wts
+        out.append(i)
+    return out
+
+
+def _touch(p, user):
+    """Отмечает, кто и когда последним менял проект (в том числе его уязвимости)."""
+    p.updated_by = user.id
+    p.updated_at = datetime.utcnow()
+
+
+@app.get("/api/projects/{pid}/history")
+def project_history(pid: int, limit: int = 300, db: Session = Depends(get_db),
+                    user: models.User = Depends(current_user)):
+    _load_project(db, pid, user)
+    q = (db.query(models.AuditEntry).filter_by(project_id=pid)
+         .order_by(models.AuditEntry.at.desc(), models.AuditEntry.id.desc()).limit(min(limit, 1000)))
+    return [audit.entry_dict(e) for e in q]
 
 
 def _remove_upload_files(filenames):
@@ -276,7 +356,7 @@ def delete_project(pid: int, db: Session = Depends(get_db), user: models.User = 
     p = _load_project(db, pid, user)
     if user.role != "admin" and p.created_by != user.id:
         raise HTTPException(403, "Удалять проект может администратор или его создатель")
-    files = [im.filename for v in p.vulns for im in v.images]
+    files = [im.filename for v in p.vulns for im in v.images] + [im.filename for im in p.images]
     vulns = len(p.vulns)
     db.delete(p); db.commit()
     # файлы удаляются только после успешного удаления записей
@@ -292,8 +372,12 @@ def add_vuln(pid: int, data: schemas.VulnCreate, db: Session = Depends(get_db),
              user: models.User = Depends(current_user)):
     p = _load_project(db, pid, user)
     n = db.query(models.Vulnerability).filter_by(project_id=pid, work_type=data.work_type).count()
-    v = models.Vulnerability(project_id=pid, order_index=n, **data.model_dump())
-    db.add(v); db.commit(); db.refresh(v)
+    v = models.Vulnerability(project_id=pid, order_index=n, created_by=user.id, updated_by=user.id,
+                             **data.model_dump())
+    db.add(v); db.flush()
+    _touch(p, user)
+    audit.log(db, user, pid, "vuln", v.id, "create", v.title)
+    db.commit(); db.refresh(v)
     return serializers.vuln_dict(v, fstec_settings(db))
 
 
@@ -303,13 +387,24 @@ def update_vuln(vid: int, data: schemas.VulnUpdate, db: Session = Depends(get_db
     v = db.get(models.Vulnerability, vid)
     if not v:
         raise HTTPException(404, "Уязвимость не найдена")
-    _load_project(db, v.project_id, user)
-    for k, val in data.model_dump(exclude_unset=True).items():
+    p = _load_project(db, v.project_id, user)
+    payload = data.model_dump(exclude_unset=True)
+    changed = [k for k, val in payload.items() if getattr(v, k) != val]
+    for k, val in payload.items():
         setattr(v, k, val)
+    if changed:
+        _vuln_changed(db, p, v, user, changed)
     db.commit(); db.refresh(v)
     out = serializers.vuln_dict(v, fstec_settings(db))
     out["auto_threat_codes"] = scoring.auto_threat_codes(out, v.project.threats or [])
     return out
+
+
+def _vuln_changed(db, p, v, user, fields):
+    v.updated_by = user.id
+    v.updated_at = datetime.utcnow()
+    _touch(p, user)
+    audit.log(db, user, p.id, "vuln", v.id, "update", v.title, fields)
 
 
 @app.delete("/api/vulns/{vid}")
@@ -317,8 +412,10 @@ def delete_vuln(vid: int, db: Session = Depends(get_db), user: models.User = Dep
     v = db.get(models.Vulnerability, vid)
     if not v:
         raise HTTPException(404, "Не найдено")
-    _load_project(db, v.project_id, user)
+    p = _load_project(db, v.project_id, user)
     files = [im.filename for im in v.images]
+    _touch(p, user)
+    audit.log(db, user, p.id, "vuln", v.id, "delete", v.title)
     db.delete(v); db.commit()
     _remove_upload_files(files)
     return {"ok": True}
@@ -327,6 +424,16 @@ def delete_vuln(vid: int, db: Session = Depends(get_db), user: models.User = Dep
 # --------------------------------------------------------------------------
 # Images
 # --------------------------------------------------------------------------
+def _save_upload(file):
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
+        raise HTTPException(400, "Недопустимый тип файла")
+    fname = f"{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
+        f.write(file.file.read())
+    return fname
+
+
 @app.post("/api/vulns/{vid}/images")
 def upload_image(vid: int, block: str = Form("poc"), caption: str = Form(""),
                  file: UploadFile = File(...), db: Session = Depends(get_db),
@@ -334,17 +441,14 @@ def upload_image(vid: int, block: str = Form("poc"), caption: str = Form(""),
     v = db.get(models.Vulnerability, vid)
     if not v:
         raise HTTPException(404, "Не найдено")
-    _load_project(db, v.project_id, user)
-    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
-    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
-        raise HTTPException(400, "Недопустимый тип файла")
-    fname = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
-        f.write(file.file.read())
+    p = _load_project(db, v.project_id, user)
+    fname = _save_upload(file)
     n = db.query(models.VulnImage).filter_by(vuln_id=vid, block=block).count()
     im = models.VulnImage(vuln_id=vid, filename=fname, orig_name=file.filename,
                           caption=caption, block=block, order_index=n)
-    db.add(im); db.commit(); db.refresh(im)
+    db.add(im)
+    _vuln_changed(db, p, v, user, ["images_" + block])
+    db.commit(); db.refresh(im)
     return {"id": im.id, "caption": im.caption, "block": im.block,
             "order_index": im.order_index, "url": f"/api/images/{im.id}"}
 
@@ -367,9 +471,10 @@ def update_image(iid: int, caption: str = Form(None), order_index: int = Form(No
     if not im:
         raise HTTPException(404, "Не найдено")
     v = db.get(models.Vulnerability, im.vuln_id)
-    _load_project(db, v.project_id, user)
+    p = _load_project(db, v.project_id, user)
     if caption is not None: im.caption = caption
     if order_index is not None: im.order_index = order_index
+    _vuln_changed(db, p, v, user, ["images_" + (im.block or "poc")])
     db.commit()
     return {"ok": True}
 
@@ -380,12 +485,71 @@ def delete_image(iid: int, db: Session = Depends(get_db), user: models.User = De
     if not im:
         raise HTTPException(404, "Не найдено")
     v = db.get(models.Vulnerability, im.vuln_id)
-    _load_project(db, v.project_id, user)
-    try:
-        os.remove(os.path.join(UPLOAD_DIR, im.filename))
-    except OSError:
-        pass
+    p = _load_project(db, v.project_id, user)
+    _vuln_changed(db, p, v, user, ["images_" + (im.block or "poc")])
     db.delete(im); db.commit()
+    _remove_upload_files([im.filename])
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Изображения разделов проекта (сценарии социотехнического тестирования)
+# --------------------------------------------------------------------------
+def _project_image_dict(im):
+    return {"id": im.id, "section": im.section, "caption": im.caption,
+            "order_index": im.order_index, "url": f"/api/project-images/{im.id}"}
+
+
+@app.post("/api/projects/{pid}/images")
+def upload_project_image(pid: int, section: str = Form(...), caption: str = Form(""),
+                         file: UploadFile = File(...), db: Session = Depends(get_db),
+                         user: models.User = Depends(current_user)):
+    p = _load_project(db, pid, user)
+    fname = _save_upload(file)
+    n = db.query(models.ProjectImage).filter_by(project_id=pid, section=section).count()
+    im = models.ProjectImage(project_id=pid, section=section, filename=fname, orig_name=file.filename,
+                             caption=caption, order_index=n, created_by=user.id)
+    db.add(im)
+    _touch(p, user)
+    audit.log(db, user, pid, "project", pid, "update", p.name, ["social_images"])
+    db.commit(); db.refresh(im)
+    return _project_image_dict(im)
+
+
+@app.get("/api/project-images/{iid}")
+def get_project_image(iid: int, db: Session = Depends(get_db)):
+    im = db.get(models.ProjectImage, iid)
+    path = os.path.join(UPLOAD_DIR, im.filename) if im else ""
+    if not im or not os.path.exists(path):
+        raise HTTPException(404, "Не найдено")
+    return FileResponse(path)
+
+
+@app.patch("/api/project-images/{iid}")
+def update_project_image(iid: int, caption: str = Form(None), db: Session = Depends(get_db),
+                         user: models.User = Depends(current_user)):
+    im = db.get(models.ProjectImage, iid)
+    if not im:
+        raise HTTPException(404, "Не найдено")
+    p = _load_project(db, im.project_id, user)
+    if caption is not None:
+        im.caption = caption
+    _touch(p, user)
+    audit.log(db, user, p.id, "project", p.id, "update", p.name, ["social_images"])
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/project-images/{iid}")
+def delete_project_image(iid: int, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    im = db.get(models.ProjectImage, iid)
+    if not im:
+        raise HTTPException(404, "Не найдено")
+    p = _load_project(db, im.project_id, user)
+    _touch(p, user)
+    audit.log(db, user, p.id, "project", p.id, "update", p.name, ["social_images"])
+    db.delete(im); db.commit()
+    _remove_upload_files([im.filename])
     return {"ok": True}
 
 
@@ -400,6 +564,7 @@ def generate_report(pid: int, db: Session = Depends(get_db), user: models.User =
     # карта id изображения -> имя файла на диске (имена не отдаются в API)
     img_map = {im.id: im.filename
                for v in p.vulns for im in v.images}
+    img_map.update({f"p{im.id}": im.filename for im in p.images})
     buffer = build_report(data, settings, UPLOAD_DIR, img_map)
     fname = f"Отчет_{(p.client_name or p.name or 'pentest')}".replace(" ", "_")[:80] + ".docx"
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"}

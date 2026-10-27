@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { state } from "../main.js";
-import { h, field, select, toast, badge, confirmModal, debouncePatch } from "../ui.js";
+import { h, field, select, toast, badge, confirmModal, debouncePatch, whoLine } from "../ui.js";
 
 // Мультивыбор кодов (угрозы/интерфейсы) из каталога проекта
 function multiPick(options, selected, onChange) {
@@ -24,7 +24,7 @@ export function vulnCard(v, onChange, onDelete, index, project) {
   const container = h("div", { class: "vuln" });
 
   const save = debouncePatch(async (patch) => {
-    try { const updated = await api.updateVuln(v.id, patch); Object.assign(v, updated); onChange(); refreshHead(); refreshComputed(); refreshAutoHint(); }
+    try { const updated = await api.updateVuln(v.id, patch); Object.assign(v, updated); onChange(); refreshHead(); refreshMeta(); refreshComputed(); refreshAutoHint(); }
     catch (e) { toast(e.message, true); }
   }, 500);
   const field_ = (key) => (val) => { v[key] = val; save({ [key]: val }); };
@@ -40,6 +40,9 @@ export function vulnCard(v, onChange, onDelete, index, project) {
       h("button", { class: "btn danger sm", onclick: () => confirmModal("Удалить уязвимость?", async () => { try { await api.deleteVuln(v.id); onDelete(); } catch (e) { toast(e.message, true); } }) }, "Удалить"),
     );
   }
+
+  const meta = h("div", { style: { marginBottom: "10px" } });
+  const refreshMeta = () => meta.replaceChildren(whoLine(v));
 
   // ---- computed display ----
   const computed = h("div", { class: "card pad", style: { background: "#fff7f2", marginBottom: "14px" } });
@@ -119,8 +122,11 @@ export function vulnCard(v, onChange, onDelete, index, project) {
   const txt = (key, ph) => h("textarea", { placeholder: ph || "", oninput: e => field_(key)(e.target.value) }, v[key] || "");
 
   body.append(
+    meta,
     computed,
     field("Название уязвимости", inp("title", "Напр.: Обход авторизации панели администратора")),
+    v.work_type === "web" && field("Категория OWASP Top 10 (2021)",
+      select((ref.owasp_top10 || []).map(o => ({ value: o.key, label: o.name })), v.owasp, field_("owasp"), { placeholder: "— не выбрано —" })),
     h("div", { class: "cols2" },
       field("Границы", inp("scope", "домен / IP / endpoint")),
       field("Инструменты", inp("tools", "BurpSuite, nmap…")),
@@ -173,7 +179,7 @@ export function vulnCard(v, onChange, onDelete, index, project) {
     txt("recommendations"),
   );
 
-  refreshHead(); refreshComputed(); refreshAutoHint();
+  refreshHead(); refreshComputed(); refreshAutoHint(); refreshMeta();
   container.append(head, body);
   return container;
 }

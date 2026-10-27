@@ -16,6 +16,10 @@ class UserOut(BaseModel):
     id: int
     login: str
     full_name: str
+    last_name: str = ""
+    first_name: str = ""
+    middle_name: str = ""
+    short_name: str = ""
     position: str
     role: str
     is_active: bool
@@ -27,12 +31,18 @@ class UserOut(BaseModel):
 class UserCreate(BaseModel):
     login: str
     password: str
-    full_name: str = ""
+    last_name: str = ""
+    first_name: str = ""
+    middle_name: str = ""
+    full_name: str = ""          # устаревшее: если части ФИО не заданы, раскладывается по пробелам
     position: str = ""
     role: str = "executor"
 
 
 class UserUpdate(BaseModel):
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    middle_name: Optional[str] = None
     full_name: Optional[str] = None
     position: Optional[str] = None
     role: Optional[str] = None
@@ -85,6 +95,7 @@ class ProjectUpdate(BaseModel):
     scope: Optional[dict] = None
     approvals: Optional[list[dict]] = None
     security_notes: Optional[dict] = None
+    social: Optional[dict] = None
     member_ids: Optional[list[int]] = None
 
 
@@ -110,6 +121,7 @@ class VulnBase(BaseModel):
     poc: str = ""
     exploitation_result: str = ""
     recommendations: str = ""
+    owasp: str = ""
 
 
 class VulnCreate(VulnBase):
@@ -137,4 +149,5 @@ class VulnUpdate(BaseModel):
     poc: Optional[str] = None
     exploitation_result: Optional[str] = None
     recommendations: Optional[str] = None
+    owasp: Optional[str] = None
     order_index: Optional[int] = None

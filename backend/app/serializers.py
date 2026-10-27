@@ -2,6 +2,14 @@
 from . import models, scoring
 
 
+def _name(u):
+    return u.short_name if u else None
+
+
+def _ts(dt):
+    return dt.isoformat() if dt else None
+
+
 def vuln_dict(v: "models.Vulnerability", settings_fstec=None) -> dict:
     data = {
         "id": v.id,
@@ -27,6 +35,13 @@ def vuln_dict(v: "models.Vulnerability", settings_fstec=None) -> dict:
         "poc": v.poc,
         "exploitation_result": v.exploitation_result,
         "recommendations": v.recommendations,
+        "owasp": v.owasp or "",
+        "created_by": v.created_by,
+        "created_by_name": _name(v.creator),
+        "updated_by": v.updated_by,
+        "updated_by_name": _name(v.updater),
+        "created_at": _ts(v.created_at),
+        "updated_at": _ts(v.updated_at),
         "images": [
             {"id": im.id, "caption": im.caption, "block": im.block,
              "order_index": im.order_index, "url": f"/api/images/{im.id}"}
@@ -59,17 +74,27 @@ def project_dict(p: "models.Project", with_vulns=True, settings_fstec=None) -> d
         "scope": p.scope or {},
         "approvals": p.approvals or [],
         "security_notes": p.security_notes or {},
+        "social": p.social or {},
+        "images": [{"id": im.id, "section": im.section, "caption": im.caption,
+                    "order_index": im.order_index, "url": f"/api/project-images/{im.id}"}
+                   for im in p.images],
         "member_ids": [m.user_id for m in p.members],
         "created_by": p.created_by,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "created_by_name": _name(p.creator),
+        "updated_by": p.updated_by,
+        "updated_by_name": _name(p.updater),
+        "created_at": _ts(p.created_at),
+        "updated_at": _ts(p.updated_at),
     }
+    d["social_stats"] = scoring.social_stats(d["social"])
     if with_vulns:
         vulns = [vuln_dict(v, settings_fstec) for v in p.vulns]
         d["vulns"] = vulns
-        d["summary"] = scoring.summary_tables(vulns, p.work_types or [], p.security_notes or {})
+        d["summary"] = scoring.summary_tables(vulns, p.work_types or [], p.security_notes or {},
+                                              d["social_stats"])
         for v in vulns:
             # угрозы, которые будут подобраны, если в карточке ничего не отмечено
             v["auto_threat_codes"] = scoring.auto_threat_codes(v, p.threats or [])
-        d["auto_threats"] = scoring.actual_threats(vulns, p.threats or [], p.interfaces or [])
+        d["auto_threats"] = scoring.actual_threats(vulns, p.threats or [], p.interfaces or [],
+                                                   social_stats=d["social_stats"] if "social" in (p.work_types or []) else None)
     return d

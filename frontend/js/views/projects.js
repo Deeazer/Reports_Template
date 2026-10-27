@@ -1,6 +1,6 @@
 import { api, auth } from "../api.js";
 import { state, navigate } from "../main.js";
-import { h, field, toast, confirmModal, badge } from "../ui.js";
+import { h, field, toast, confirmModal, badge, fmtDate } from "../ui.js";
 import { deleteProject } from "./project.js";
 
 export async function renderProjects() {
@@ -38,7 +38,8 @@ export async function renderProjects() {
         ...(p.work_types || []).map(w => h("span", { class: "chip" }, wt[w] ? wt[w].title : w))),
       stats,
       h("div", { class: "muted", style: { marginTop: "10px", fontSize: "12px" } },
-        `Уязвимостей: ${p.vuln_count} · обновлён ${new Date(p.updated_at).toLocaleDateString("ru")}`),
+        `Уязвимостей: ${p.vuln_count} · изменён ${fmtDate(p.updated_at)}` + (p.updated_by_name ? ` (${p.updated_by_name})` : "")),
+      p.created_by_name && h("div", { class: "muted", style: { fontSize: "12px" } }, `Создал: ${p.created_by_name}`),
     );
     grid.append(card);
   }

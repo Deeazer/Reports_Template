@@ -9,12 +9,14 @@ export async function renderUsers() {
     h("button", { class: "btn", onclick: () => openForm() }, "+ Новый пользователь")));
 
   const tbl = h("table");
-  tbl.append(h("tr", {}, h("th", {}, "Логин"), h("th", {}, "Ф.И.О."), h("th", {}, "Должность"),
+  tbl.append(h("tr", {}, h("th", {}, "Логин"), h("th", {}, "Фамилия"), h("th", {}, "Имя"), h("th", {}, "Отчество"), h("th", {}, "Должность"),
     h("th", {}, "Роль"), h("th", {}, "Статус"), h("th", {}, "")));
   users.forEach(u => {
     tbl.append(h("tr", {},
       h("td", {}, u.login),
-      h("td", {}, u.full_name || "—"),
+      h("td", {}, u.last_name || (u.first_name ? "—" : u.full_name || "—")),
+      h("td", {}, u.first_name || "—"),
+      h("td", {}, u.middle_name || "—"),
       h("td", {}, u.position || "—"),
       h("td", {}, h("span", { class: "pill-role " + (u.role === "admin" ? "admin" : "") }, u.role === "admin" ? "администратор" : "исполнитель")),
       h("td", {}, u.is_active ? "активен" : h("span", { class: "muted" }, "отключён")),
@@ -30,7 +32,11 @@ export async function renderUsers() {
 function openForm(user) {
   const isEdit = !!user;
   const login = h("input", { value: user?.login || "", disabled: isEdit });
-  const full = h("input", { value: user?.full_name || "" });
+  const last = h("input", { value: user?.last_name || "", placeholder: "Иванов" });
+  const first = h("input", { value: user?.first_name || "", placeholder: "Иван" });
+  const middle = h("input", { value: user?.middle_name || "", placeholder: "Иванович (при наличии)" });
+  // учётная запись, созданная до разделения ФИО: части пусты, показываем прежнее значение
+  if (user && !user.last_name && user.full_name) last.placeholder = user.full_name;
   const pos = h("input", { value: user?.position || "" });
   const pass = h("input", { type: "password", placeholder: isEdit ? "Оставьте пустым, чтобы не менять" : "" });
   let role = user?.role || "executor";
@@ -42,13 +48,14 @@ function openForm(user) {
   const close = () => bg.remove();
   const submit = async () => {
     try {
+      if (!last.value.trim() || !first.value.trim()) { toast("Укажите фамилию и имя", true); return; }
       if (isEdit) {
-        const patch = { full_name: full.value, position: pos.value, role, is_active: active };
+        const patch = { last_name: last.value, first_name: first.value, middle_name: middle.value, position: pos.value, role, is_active: active };
         if (pass.value) patch.password = pass.value;
         await api.updateUser(user.id, patch);
       } else {
         if (!login.value.trim() || !pass.value) { toast("Логин и пароль обязательны", true); return; }
-        await api.createUser({ login: login.value.trim(), password: pass.value, full_name: full.value, position: pos.value, role });
+        await api.createUser({ login: login.value.trim(), password: pass.value, last_name: last.value, first_name: first.value, middle_name: middle.value, position: pos.value, role });
       }
       close(); location.reload();
     } catch (e) { toast(e.message, true); }
@@ -56,7 +63,7 @@ function openForm(user) {
   bg.append(h("div", { class: "modal" },
     h("h3", { style: { marginTop: 0 } }, isEdit ? "Редактирование пользователя" : "Новый пользователь"),
     field("Логин", login),
-    field("Ф.И.О.", full),
+    h("div", { class: "cols3" }, field("Фамилия", last), field("Имя", first), field("Отчество", middle)),
     field("Должность", pos),
     field(isEdit ? "Новый пароль" : "Пароль", pass),
     field("Роль", roleSel),

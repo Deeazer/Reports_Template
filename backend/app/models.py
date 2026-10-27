@@ -10,12 +10,27 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     login = Column(String(128), unique=True, nullable=False, index=True)
-    full_name = Column(String(256), default="")
+    full_name = Column(String(256), default="")            # «Фамилия Имя Отчество», собирается из частей
+    last_name = Column(String(128), default="")
+    first_name = Column(String(128), default="")
+    middle_name = Column(String(128), default="")
     position = Column(String(256), default="")
     password_hash = Column(String(256), nullable=False)
     role = Column(String(32), nullable=False, default="executor")  # admin | executor
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    def compose_full_name(self):
+        parts = [self.last_name, self.first_name, self.middle_name]
+        self.full_name = " ".join(x.strip() for x in parts if x and x.strip())
+
+    @property
+    def short_name(self):
+        """«Иванов И. И.» — для отметок об авторе изменений."""
+        if self.last_name:
+            initials = " ".join(f"{x.strip()[0]}." for x in (self.first_name, self.middle_name) if x and x.strip())
+            return f"{self.last_name} {initials}".strip()
+        return self.full_name or self.login
 
 
 class Setting(Base):
@@ -48,13 +63,21 @@ class Project(Base):
     scope = Column(JSON, default=dict)
     approvals = Column(JSON, default=list)                 # лист согласования [{side,org,position,name,date}]
     security_notes = Column(JSON, default=dict)            # 1.4.x: {work_type: {"advantages": [str]}}
+    # социотехническое тестирование: {"scenarios": [...], "targets": [...], "preparation": str,
+    #                                 "recommendations": str}
+    social = Column(JSON, default=dict)
     created_by = Column(Integer, ForeignKey("users.id"))
+    updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])
     vulns = relationship("Vulnerability", back_populates="project",
                          cascade="all, delete-orphan")
     members = relationship("ProjectMember", cascade="all, delete-orphan")
+    images = relationship("ProjectImage", cascade="all, delete-orphan",
+                          order_by="ProjectImage.order_index")
 
 
 class ProjectMember(Base):
@@ -92,9 +115,14 @@ class Vulnerability(Base):
     poc = Column(Text, default="")
     exploitation_result = Column(Text, default="")
     recommendations = Column(Text, default="")
+    owasp = Column(String(16), default="")                 # категория OWASP Top 10 (веб-приложения)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])
     project = relationship("Project", back_populates="vulns")
     images = relationship("VulnImage", back_populates="vuln",
                           cascade="all, delete-orphan", order_by="VulnImage.order_index")
@@ -111,3 +139,33 @@ class VulnImage(Base):
     order_index = Column(Integer, default=0)
 
     vuln = relationship("Vulnerability", back_populates="images")
+
+
+class ProjectImage(Base):
+    """Изображение раздела проекта, не привязанное к уязвимости
+    (например, сценарий социотехнического тестирования)."""
+    __tablename__ = "project_images"
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"))
+    section = Column(String(128), nullable=False)          # social:<id сценария>
+    filename = Column(String(512))
+    orig_name = Column(String(512))
+    caption = Column(String(1024), default="")
+    order_index = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditEntry(Base):
+    """Журнал изменений проекта: кто, когда и что добавил, изменил или удалил."""
+    __tablename__ = "audit_log"
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    user_name = Column(String(256), default="")            # снимок имени: запись остаётся после удаления пользователя
+    at = Column(DateTime, default=datetime.utcnow, index=True)
+    entity = Column(String(32), nullable=False)            # project | vuln | image
+    entity_id = Column(Integer)
+    entity_title = Column(String(1024), default="")
+    action = Column(String(16), nullable=False)            # create | update | delete
+    fields = Column(JSON, default=list)

@@ -1,7 +1,9 @@
 import { api, auth } from "../api.js";
 import { state, navigate } from "../main.js";
-import { h, field, select, toast, confirmModal, confirmTyped, badge, debouncePatch } from "../ui.js";
+import { h, field, select, toast, confirmModal, confirmTyped, badge, debouncePatch, whoLine } from "../ui.js";
 import { vulnCard } from "./vuln.js";
+import { socialTab } from "./social.js";
+import { historyTab } from "./history.js";
 
 export async function renderProject(pid) {
   const p = await api.project(pid);
@@ -10,10 +12,13 @@ export async function renderProject(pid) {
   try { if (auth.isAdmin) users = await api.users(); } catch {}
 
   const wrap = h("div", {});
+  const meta = h("div", { style: { marginTop: "4px" } });
+  const refreshMeta = () => meta.replaceChildren(whoLine(p));
   const save = debouncePatch(async (patch) => {
-    try { Object.assign(p, await api.updateProject(pid, patch)); toast("Сохранено"); }
+    try { Object.assign(p, await api.updateProject(pid, patch)); refreshMeta(); toast("Сохранено"); }
     catch (e) { toast(e.message, true); }
   }, 700);
+  refreshMeta();
   const upd = (key) => (val) => { p[key] = val; save({ [key]: val }); };
 
   // header
@@ -21,7 +26,7 @@ export async function renderProject(pid) {
     h("div", {},
       h("a", { onclick: () => navigate({ name: "projects" }), style: { cursor: "pointer" } }, "← Проекты"),
       h("h2", { style: { margin: "6px 0 0" } }, p.name),
-      h("div", { class: "muted" }, p.client_name || "")),
+      h("div", { class: "muted" }, p.client_name || ""), meta),
     h("div", { class: "row" },
       h("button", { class: "btn sec", onclick: () => doDownload(p) }, "⭳ Скачать отчёт (.docx)"),
       (auth.isAdmin || p.created_by === auth.user.id) &&
@@ -36,6 +41,7 @@ export async function renderProject(pid) {
     ...p.work_types.map(wt => ({ key: "wt_" + wt, label: ref.work_types[wt].title })),
     { key: "results", label: "Итоги (1.4, 3)" },
     { key: "tools", label: "Инструментарий" },
+    { key: "history", label: "История" },
   ];
   // список пользователей доступен только администратору, поэтому и вкладка — только ему
   if (auth.isAdmin) tabs.push({ key: "access", label: "Доступ" });
@@ -67,7 +73,13 @@ export async function renderProject(pid) {
     }
     else if (key === "tools") content.append(toolsTab(p, save));
     else if (key === "access") content.append(accessTab(p, users, save));
-    else if (key.startsWith("wt_")) content.append(vulnsTab(p, key.slice(3)));
+    else if (key === "history") content.append(await historyTab(p));
+    else if (key.startsWith("wt_")) {
+      const wt = key.slice(3);
+      // изменения уязвимостей тоже отражаются в «Изменил» у проекта
+      const onChanged = () => { p.updated_by_name = auth.user.full_name; p.updated_at = new Date().toISOString(); refreshMeta(); };
+      content.append(ref.work_types[wt].kind === "social" ? socialTab(p, refreshMeta) : vulnsTab(p, wt, onChanged));
+    }
   }
   setTab(active);
   return wrap;
@@ -145,7 +157,7 @@ function approvalsEditor(p, upd) {
 // ---------- Границы исследования (Приложение 1) ----------
 function scopeTab(p, save) {
   p.scope = p.scope || {};
-  for (const k of ["ips", "fqdns", "segments"]) p.scope[k] = p.scope[k] || [];
+  for (const k of ["ips", "fqdns", "segments", "web_apps"]) p.scope[k] = p.scope[k] || [];
   const onSave = () => save({ scope: p.scope });
   return h("div", {},
     h("p", { class: "muted" }, "Данные выводятся в Приложение 1 отчёта. Пустые таблицы в отчёт не попадают."),
@@ -155,6 +167,11 @@ function scopeTab(p, save) {
       { name: "", description: "" }, onSave),
     jsonTable("Сетевые сегменты", p.scope.segments, [["segment", "Сетевой сегмент"], ["purpose", "Назначение"]],
       { segment: "", purpose: "" }, onSave),
+    (p.work_types.includes("web") || p.scope.web_apps.length) &&
+      jsonTable("Веб-приложения", p.scope.web_apps, [["url", "URL"], ["description", "Описание"]],
+        { url: "", description: "" }, onSave),
+    p.work_types.includes("social") &&
+      h("p", { class: "muted" }, "Целевая группа социотехнического тестирования заполняется на вкладке «Социотехническое тестирование» и выводится в Приложение 1 отдельной таблицей."),
   );
 }
 
@@ -170,7 +187,8 @@ function resultsTab(p, ref, save) {
     if (!sec) return;
     const notes = p.security_notes[wt] = p.security_notes[wt] || { advantages: [] };
     const auto = sec.advantages.slice(sec.manual_advantages.length);
-    const lvl = h("span", { class: "stat", style: { background: SECURITY_STYLE[sec.level], color: sec.level === "Средний" ? "#333" : "#fff" } }, sec.level);
+    const lvl = h("span", { class: "stat", style: { background: SECURITY_STYLE[sec.level] || "var(--muted)", color: sec.level === "Средний" ? "#333" : "#fff" } }, sec.level);
+    const isSocial = ref.work_types[wt].kind === "social";
     wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
       h("div", { class: "between" }, h("b", {}, `Таблица 1.4.${i + 1} – ${sec.title}`), h("span", {}, "Общий уровень защищенности: ", lvl)),
       h("div", { class: "cols2", style: { marginTop: "10px" } },
@@ -180,7 +198,7 @@ function resultsTab(p, ref, save) {
               (notes.advantages || []).join("\n"))),
           auto.length ? h("div", { class: "muted", style: { fontSize: "12px" } }, "Добавляются автоматически: " + auto.join("; ")) : ""),
         h("div", {},
-          h("div", { style: { fontWeight: 600, fontSize: "12px", color: "var(--muted)", marginBottom: "6px" } }, "НЕДОСТАТКИ (из уязвимостей)"),
+          h("div", { style: { fontWeight: 600, fontSize: "12px", color: "var(--muted)", marginBottom: "6px" } }, isSocial ? "НЕДОСТАТКИ (из результатов тестирования)" : "НЕДОСТАТКИ (из уязвимостей)"),
           sec.disadvantages.length ? h("ol", { style: { margin: 0, paddingLeft: "18px" } }, ...sec.disadvantages.map(d => h("li", {}, d)))
             : h("div", { class: "muted" }, "Недостатков не выявлено"))),
     ));
@@ -192,10 +210,11 @@ function resultsTab(p, ref, save) {
   if (!(sum.rows || []).length) t31.append(h("tr", {}, h("td", { colspan: 3, class: "muted" }, "Уязвимости не добавлены")));
   // таблица 3.2
   const levels = ["Высокий", "Средний", "Низкий", "Информативный"];
+  const vwts = p.work_types.filter(wt => ref.work_types[wt].kind === "vulns");
   const t32 = h("table");
-  t32.append(h("tr", {}, h("th", {}, "Уровень риска"), ...p.work_types.map(wt => h("th", {}, ref.work_types[wt].title)), h("th", {}, "Всего")));
+  t32.append(h("tr", {}, h("th", {}, "Уровень риска"), ...vwts.map(wt => h("th", {}, ref.work_types[wt].title)), h("th", {}, "Всего")));
   levels.forEach(l => t32.append(h("tr", {}, h("td", {}, badge(l)),
-    ...p.work_types.map(wt => h("td", {}, String(((sum.counts_by_wt || {})[wt] || {})[l] || 0))),
+    ...vwts.map(wt => h("td", {}, String(((sum.counts_by_wt || {})[wt] || {})[l] || 0))),
     h("td", {}, h("b", {}, String((sum.counts || {})[l] || 0))))));
   wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("b", {}, "Таблица 3.1 – Обнаруженные уязвимости по уровню риска"), h("div", { style: { marginTop: "8px" } }, t31)));
@@ -333,7 +352,7 @@ function toolsTab(p, save) {
 }
 
 // ---------- Уязвимости по виду работ ----------
-function vulnsTab(p, wt) {
+function vulnsTab(p, wt, onChanged) {
   const box = h("div", {});
   const list = h("div", {});
   const vulns = () => p.vulns.filter(v => v.work_type === wt).sort((a, b) => a.order_index - b.order_index);
@@ -345,7 +364,7 @@ function vulnsTab(p, wt) {
     list.replaceChildren();
     const vs = vulns();
     if (!vs.length) list.append(h("div", { class: "empty" }, "Уязвимости не добавлены"));
-    vs.forEach((v, i) => list.append(vulnCard(v, () => {}, reload, i, p)));
+    vs.forEach((v, i) => list.append(vulnCard(v, () => onChanged && onChanged(), reload, i, p)));
   };
   draw();
 

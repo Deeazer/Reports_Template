@@ -51,6 +51,13 @@ export const api = {
   createProject: (d) => req("POST", "/projects", d),
   updateProject: (id, d) => req("PATCH", "/projects/" + id, d),
   deleteProject: (id) => req("DELETE", "/projects/" + id),
+  history: (id) => req("GET", `/projects/${id}/history`),
+  uploadProjectImage: (pid, file, section, caption) => {
+    const fd = new FormData(); fd.append("file", file); fd.append("section", section); fd.append("caption", caption || "");
+    return req("POST", `/projects/${pid}/images`, fd, true);
+  },
+  updateProjectImage: (id, caption) => { const fd = new FormData(); fd.append("caption", caption); return req("PATCH", "/project-images/" + id, fd, true); },
+  deleteProjectImage: (id) => req("DELETE", "/project-images/" + id),
 
   addVuln: (pid, d) => req("POST", `/projects/${pid}/vulns`, d),
   updateVuln: (id, d) => req("PATCH", "/vulns/" + id, d),

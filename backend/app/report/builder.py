@@ -53,6 +53,7 @@ def _add_image_block(doc, images, upload_dir):
 # builder работает со словарём image из serializers (url=/api/images/ID),
 # но нам нужен файл; передаём отдельную карту id->filename
 _IMG_MAP = {}
+_UPLOAD_DIR = ""
 
 
 def _filename_for(im):
@@ -303,6 +304,15 @@ def _section_methodology(doc, p, settings):
     H.heading2(doc, "Программа и методика тестирования на проникновение", "2.1")
     H.new_paragraph(doc, "Тестирование на проникновение ресурсов Заказчика выполнено в соответствии с "
                          "ГОСТ Р 58143-2018.", align=L)
+    if "web" in p["work_types"]:
+        H.new_paragraph(doc, "Анализ защищенности веб-приложений дополнительно выполнен с учётом:", align=L,
+                        first_line=False)
+        H.bullet(doc, "The Open Web Application Security Project (OWASP) Web Security Testing Guide;")
+        H.bullet(doc, "The Open Web Application Security Project (OWASP) Top 10.")
+    if "social" in p["work_types"]:
+        H.new_paragraph(doc, "Социотехническое тестирование проведено по согласованным с Заказчиком "
+                             "сценариям в отношении утверждённой целевой группы сотрудников (раздел "
+                             f"{p['summary']['section_no']['social']}).", align=L)
     H.new_paragraph(doc, "Методология проведения тестирования на проникновение объектов информационной "
                          "инфраструктуры приведена в Приложении 2.", align=L)
     H.heading2(doc, "Использованный инструментарий тестирования на проникновение объектов информационной инфраструктуры", "2.2")
@@ -340,7 +350,7 @@ def _section_summary(doc, p, summary, settings):
         H.new_paragraph(doc, "Распределение выявленных уязвимостей по уровням итогового риска и видам "
                              "работ представлено в таблице 3.2.", align=L)
         H.caption(doc, "Таблица 3.2 – Количество выявленных уязвимостей по уровням риска")
-        wts = [wt for wt in p["work_types"] if wt in R.WORK_TYPES]
+        wts = [wt for wt in p["work_types"] if R.WORK_TYPES.get(wt, {}).get("kind") == "vulns"]
         t = _make_table(doc, len(wts) + 2)
         first_w, total_w = 50, 25
         col_w = (180 - first_w - total_w) / max(len(wts), 1)
@@ -363,6 +373,18 @@ def _section_summary(doc, p, summary, settings):
             word = "уязвимости" if n_nr % 10 == 1 and n_nr % 100 != 11 else "уязвимостей"
             H.new_paragraph(doc, f"Для {n_nr} {word} итоговый риск не определён (не заполнены критичность "
                                  "или вероятность эксплуатации), в таблицу 3.2 они не включены.", align=L, italic=True)
+
+    if "social" in p["work_types"]:
+        st = p.get("social_stats") or {}
+        sec = summary["section_no"]["social"]
+        H.heading2(doc, "Результаты социотехнического тестирования", "3.3")
+        if not st.get("total"):
+            H.new_paragraph(doc, "Данные о целевой группе не внесены.", align=L, italic=True)
+        else:
+            H.new_paragraph(doc, f"Сводные результаты по сценариям приведены в таблице 3.3.1, подробности — "
+                                 f"в разделе {sec}.", align=L)
+            H.caption(doc, "Таблица 3.3.1 – Сводные результаты социотехнического тестирования")
+            _social_stats_table(doc, st)
 
 
 # ==========================================================================
@@ -390,6 +412,9 @@ def _vuln_card(doc, v, upload_dir, include_fstec):
     kv("Вероятность эксплуатации", v.get("probability", ""))
     kv("Итоговый риск", v.get("final_risk", ""), bold=True, bg=_risk_color(v.get("final_risk")))
     kv("Модели нарушителя", v.get("intruder_models", ""))
+    if v.get("work_type") == "web" and v.get("owasp"):
+        owasp = {o["key"]: o["name"] for o in R.OWASP_TOP10}
+        kv("Категория OWASP Top 10", owasp.get(v["owasp"], v["owasp"]))
 
     fstec = v.get("fstec")
     if include_fstec and fstec:
@@ -458,6 +483,9 @@ def _work_sections(doc, p, summary, settings):
             continue
         sec_no = summary["section_no"][wt]
         H.heading1(doc, info["section_title"], str(sec_no))
+        if info.get("kind") == "social":
+            _social_section(doc, p, sec_no)
+            continue
         ids = order.get(wt, [])
         vmap = {v["id"]: v for v in vulns_by_wt.get(wt, [])}
         if not ids:
@@ -469,6 +497,141 @@ def _work_sections(doc, p, summary, settings):
                 continue
             H.heading2(doc, v.get("title", "Без названия"), f"{sec_no}.{i}")
             _vuln_card(doc, v, settings["_upload_dir"], include_fstec)
+
+
+# ==========================================================================
+# Социотехническое тестирование
+# ==========================================================================
+def _plural(n, one, few, many):
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def _social_stats_table(doc, st):
+    t = _make_table(doc, 6)
+    _header_row(t, ["Сценарий", "Целевая группа", "Открыли сообщение", "Перешли по ссылке",
+                    "Ввели учётные данные", "Сообщили в службу ИБ"], widths=[50, 26, 26, 26, 26, 26])
+
+    def cells(row, d, bold=False):
+        total = d.get("total", 0)
+        H.fill_cell(row.cells[1], str(total), align=C, size=10, bold=bold)
+        for i, key in enumerate(("opened", "clicked", "submitted", "reported"), 2):
+            H.fill_cell(row.cells[i], f"{d.get(key, 0)} ({d.get(key + '_pct', 0)}%)", align=C, size=10, bold=bold)
+
+    for d in st.get("by_scenario") or []:
+        if not d.get("total"):
+            continue
+        row = t.add_row()
+        H.fill_cell(row.cells[0], d["name"], size=10)
+        cells(row, d)
+    row = t.add_row()
+    H.fill_cell(row.cells[0], "Всего", bold=True, size=10)
+    cells(row, st, bold=True)
+
+
+def _project_images(doc, p, section):
+    imgs = sorted([im for im in p.get("images") or [] if im.get("section") == section],
+                  key=lambda x: x.get("order_index", 0))
+    for im in imgs:
+        fname = _IMG_MAP.get(f"p{im['id']}", "")
+        path = os.path.join(_UPLOAD_DIR, fname) if fname else ""
+        if not path or not os.path.exists(path):
+            continue
+        par = doc.add_paragraph(); par.alignment = C
+        try:
+            par.add_run().add_picture(path, width=Mm(150))
+        except Exception:
+            continue
+        if im.get("caption"):
+            cap = doc.add_paragraph(); cap.alignment = C
+            cap.paragraph_format.space_after = Pt(6)
+            H._set_run(cap.add_run(im["caption"]), size=11)
+
+
+def _social_section(doc, p, sec):
+    social = p.get("social") or {}
+    st = p.get("social_stats") or {}
+    scenarios = social.get("scenarios") or []
+
+    H.heading2(doc, "Общие положения", f"{sec}.1")
+    H.new_paragraph(doc, "Целью проведения социотехнического тестирования является оценка осведомленности "
+                         "сотрудников Заказчика в области информационной безопасности и их готовности "
+                         "противостоять атакам методами социальной инженерии.", align=L)
+    H.new_paragraph(doc, "Сценарии и целевая группа согласованы с Заказчиком до начала работ. "
+                         + (f"В целевую группу вошли {st['total']} {_plural(st['total'], 'сотрудник', 'сотрудника', 'сотрудников')}; "
+                            "перечень приведён в Приложении 1."
+                            if st.get("total") else "Перечень целевой группы приведён в Приложении 1."), align=L)
+
+    H.heading2(doc, "Сценарии социальной инженерии", f"{sec}.2")
+    if not scenarios:
+        H.new_paragraph(doc, "Сценарии не добавлены.", align=L, italic=True)
+    else:
+        H.caption(doc, f"Таблица {sec}.2.1 – Сценарии социотехнического тестирования")
+        t = _make_table(doc, 4)
+        _header_row(t, ["№", "Сценарий", "Целевая группа", "Повод / триггер"], widths=[12, 58, 55, 55])
+        for i, sc in enumerate(scenarios, 1):
+            row = t.add_row()
+            H.fill_cell(row.cells[0], str(i), align=C, size=10)
+            H.fill_cell(row.cells[1], sc.get("name", ""), size=10)
+            H.fill_cell(row.cells[2], sc.get("target_group", ""), size=10)
+            H.fill_cell(row.cells[3], sc.get("trigger", ""), size=10)
+        for i, sc in enumerate(scenarios, 1):
+            H.heading3(doc, sc.get("name") or f"Сценарий {i}", f"{sec}.2.{i}")
+            if sc.get("description"):
+                H.new_paragraph(doc, sc["description"], align=L)
+            _project_images(doc, p, f"social:{sc.get('id')}")
+
+    n = 3
+    if (social.get("preparation") or "").strip():
+        H.heading2(doc, "Подготовка к проведению социотехнического тестирования", f"{sec}.{n}")
+        H.new_paragraph(doc, social["preparation"], align=L)
+        n += 1
+
+    H.heading2(doc, "Результаты социотехнического тестирования", f"{sec}.{n}")
+    H.new_paragraph(doc, "В ходе тестирования учитывались следующие характеристики:", align=L, first_line=False)
+    for i, txt in enumerate(["открывалось ли сообщение сотрудником Заказчика",
+                             "переходил ли сотрудник по ссылке на подготовленный ресурс",
+                             "вводил ли сотрудник аутентификационные данные",
+                             "сообщал ли сотрудник о подозрительном сообщении в службу ИБ"]):
+        H.bullet(doc, txt + (";" if i < 3 else "."))
+    if st.get("total"):
+        H.caption(doc, f"Таблица {sec}.{n}.1 – Сводная информация по результатам социотехнического тестирования")
+        _social_stats_table(doc, st)
+        if st.get("affected"):
+            H.new_paragraph(doc, "Сотрудники, выполнившие целевые действия, приведены в таблице "
+                                 f"{sec}.{n}.2.", align=L)
+            H.caption(doc, f"Таблица {sec}.{n}.2 – Сотрудники, выполнившие целевые действия")
+            t = _make_table(doc, 4)
+            _header_row(t, ["№", "Сотрудник / контакт", "Сценарий", "Выполненные действия"], widths=[12, 60, 50, 58])
+            for i, a in enumerate(st["affected"], 1):
+                row = t.add_row()
+                H.fill_cell(row.cells[0], str(i), align=C, size=10)
+                H.fill_cell(row.cells[1], a["contact"], size=10)
+                H.fill_cell(row.cells[2], a["scenario"], size=10)
+                H.fill_cell(row.cells[3], a["actions"], size=10)
+        else:
+            H.new_paragraph(doc, "Сотрудники целевой группы не переходили по ссылкам и не вводили учётные данные.",
+                            align=L)
+    else:
+        H.new_paragraph(doc, "Данные о целевой группе не внесены.", align=L, italic=True)
+    n += 1
+
+    H.heading2(doc, "Рекомендации", f"{sec}.{n}")
+    H.new_paragraph(doc, "Для устранения выявленных недостатков рекомендуется:", align=L, first_line=False)
+    recs = []
+    if st.get("submitted"):
+        recs.append("незамедлительно сменить пароли сотрудникам, которые ввели учётные данные (критический приоритет)")
+    if st.get("clicked"):
+        recs.append("провести внеплановое обучение по противодействию атакам методами социальной инженерии "
+                    "для сотрудников, выполнивших целевые действия (высокий приоритет)")
+    recs += [x.strip() for x in (social.get("recommendations") or "").split("\n") if x.strip()]
+    recs += ["внедрить многофакторную аутентификацию для критичных учётных записей",
+             "проводить регулярное обучение и тестирование сотрудников (не реже одного раза в 6 месяцев)"]
+    for i, r_ in enumerate(recs):
+        H.bullet(doc, r_ + (";" if i < len(recs) - 1 else "."))
 
 
 # ==========================================================================
@@ -484,6 +647,7 @@ def _appendix1(doc, p):
         ("ips", "Таблица П1.{n} – IP-адреса", ["№", "IP-адрес / диапазон", "Описание"], ["address", "description"]),
         ("fqdns", "Таблица П1.{n} – Доменные имена (FQDN)", ["№", "FQDN", "Описание"], ["name", "description"]),
         ("segments", "Таблица П1.{n} – Сетевые сегменты", ["№", "Сетевой сегмент", "Назначение"], ["segment", "purpose"]),
+        ("web_apps", "Таблица П1.{n} – Веб-приложения", ["№", "URL", "Описание"], ["url", "description"]),
     ]
     n = 0
     for key, cap, headers, fields in tables:
@@ -499,6 +663,21 @@ def _appendix1(doc, p):
             H.fill_cell(row.cells[0], str(i), align=C, size=10)
             H.fill_cell(row.cells[1], r.get(fields[0], ""), size=10)
             H.fill_cell(row.cells[2], r.get(fields[1], ""), size=10)
+    if "social" in p["work_types"]:
+        social = p.get("social") or {}
+        names = {sc.get("id"): sc.get("name") or f"Сценарий {i}"
+                 for i, sc in enumerate(social.get("scenarios") or [], 1)}
+        targets = [t for t in (social.get("targets") or []) if str(t.get("contact", "")).strip()]
+        if targets:
+            n += 1
+            H.caption(doc, f"Таблица П1.{n} – Целевая группа социотехнического тестирования")
+            t = _make_table(doc, 3)
+            _header_row(t, ["№", "Сотрудник / контакт", "Сценарий"], widths=[12, 98, 70])
+            for i, tg in enumerate(targets, 1):
+                row = t.add_row()
+                H.fill_cell(row.cells[0], str(i), align=C, size=10)
+                H.fill_cell(row.cells[1], tg.get("contact", ""), size=10)
+                H.fill_cell(row.cells[2], names.get(tg.get("scenario"), ""), size=10)
     if not n:
         H.new_paragraph(doc, "Границы исследования не заданы.", align=L, italic=True)
 
@@ -650,6 +829,8 @@ def build_report(project, settings, upload_dir, img_map=None):
     _IMG_MAP = img_map or {}
     settings = dict(settings)
     settings["_upload_dir"] = upload_dir
+    global _UPLOAD_DIR
+    _UPLOAD_DIR = upload_dir
 
     doc = Document()
     H.reset_toc()

@@ -91,3 +91,25 @@ export const debouncePatch = (fn, ms = 600) => {
     t = setTimeout(() => { const p = acc; acc = {}; fn(p); }, ms);
   };
 };
+
+// Дата и время из ISO-строки сервера (время на сервере — UTC без зоны)
+export function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+  if (isNaN(d)) return iso;
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// Строка «Добавил: … · Изменил: …» для проекта или уязвимости
+export function whoLine(o) {
+  const parts = [];
+  if (o.created_by_name || o.created_at) parts.push(["Добавил", o.created_by_name, o.created_at]);
+  if (o.updated_by_name && (o.updated_at !== o.created_at || o.updated_by_name !== o.created_by_name))
+    parts.push(["Изменил", o.updated_by_name, o.updated_at]);
+  const el = h("div", { class: "meta" });
+  parts.forEach(([label, who, at], i) => {
+    if (i) el.append(" · ");
+    el.append(label + ": ", h("b", {}, who || "—"), at ? ", " + fmtDate(at) : "");
+  });
+  return el;
+}

@@ -12,8 +12,10 @@ const root = () => document.getElementById("app");
 
 export function navigate(route) {
   state.route = route;
-  location.hash = routeToHash(route);
-  render();
+  const hash = routeToHash(route);
+  // смена адреса вызовет hashchange и отрисовку; иначе отрисовываем сами
+  if (location.hash !== hash) location.hash = hash;
+  else render();
 }
 function routeToHash(r) {
   if (r.name === "project") return `#/project/${r.id}`;
@@ -48,13 +50,18 @@ function shell(content) {
   );
 }
 
+let renderSeq = 0;
+
 export async function render() {
   const el = root();
+  const seq = ++renderSeq;   // отрисовка, начатая позже, отменяет текущую
   clear(el);
   if (!auth.token || !auth.user) { el.append(renderLogin(onLogin)); return; }
   if (!state.ref) { try { state.ref = await api.refdata(); } catch (e) { toast(e.message, true); } }
+  if (seq !== renderSeq) return;
   // за время запроса сессия могла завершиться (выход в другой вкладке)
   if (!auth.token || !auth.user) { clear(el); el.append(renderLogin(onLogin)); return; }
+  clear(el);
   const r = state.route;
   const slot = h("div", {}, h("div", { class: "empty" }, "Загрузка…"));
   el.append(shell(slot));
@@ -64,6 +71,7 @@ export async function render() {
     else if (r.name === "users") view = await renderUsers();
     else if (r.name === "settings") view = await renderSettings();
     else view = await renderProjects();
+    if (seq !== renderSeq) return;
     clear(slot); slot.append(view);
   } catch (e) { clear(slot); slot.append(h("div", { class: "empty" }, "Ошибка: " + e.message)); }
 }
@@ -72,9 +80,11 @@ async function onLogin(login, password) {
   const res = await api.login(login, password);
   auth.set(res.access_token, { id: res.id, full_name: res.full_name, role: res.role, login: res.login });
   state.route = hashToRoute();
-  render();
+  // после выхода администратора в адресе может остаться его раздел
+  if (["users", "settings"].includes(state.route.name) && res.role !== "admin") navigate({ name: "projects" });
+  else render();
 }
 
-window.addEventListener("hashchange", () => { const r = hashToRoute(); if (routeToHash(r) !== location.hash) {} state.route = r; render(); });
+window.addEventListener("hashchange", () => { state.route = hashToRoute(); render(); });
 state.route = hashToRoute();
 render();
