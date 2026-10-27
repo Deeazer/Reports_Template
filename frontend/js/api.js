@@ -40,6 +40,7 @@ export const api = {
   bdu: () => req("GET", "/bdu"),
   settings: () => req("GET", "/settings"),
   saveSetting: (key, value) => req("PUT", "/settings/" + key, value),
+  importBdu: (file) => { const fd = new FormData(); fd.append("file", file); return req("POST", "/settings/bdu-import", fd, true); },
 
   users: () => req("GET", "/users"),
   createUser: (d) => req("POST", "/users", d),

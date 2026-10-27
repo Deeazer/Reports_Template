@@ -270,15 +270,14 @@ function modelTab(p, ref, save) {
 function threatsCatalog(p, save) {
   const box = h("div");
   const draw = () => {
-    const bduCount = new Set((p.threats || []).map(t => (t.bdu || "").toUpperCase()).filter(Boolean)).size;
     const complete = h("button", { class: "btn sm", onclick: async () => {
-      try { const r = await api.completeThreats(p.id); Object.assign(p, r); toast(`Добавлено угроз БДУ: ${r.threats_added}`); draw(); }
+      try { const r = await api.completeThreats(p.id); Object.assign(p, r); toast(`Каталог дополнен из БДУ: новых угроз ${r.threats_added}`); draw(); }
       catch (e) { toast(e.message, true); }
     } }, "Дополнить из БДУ");
     box.replaceChildren(jsonTable(`Каталог угроз — ${p.threats.length} (из него уязвимости выбирают реализуемые угрозы; в отчёт попадают только связанные с уязвимостями)`,
       p.threats, [["code", "№"], ["name", "Угроза"], ["bdu", "БДУ"], ["interfaces", "Интерфейс (по умолч.)"], ["intruders", "Наруш."], ["consequences", "Последствия"]],
       { code: "", name: "", bdu: "", interfaces: "", intruders: "", properties: "", consequences: "" }, () => save({ threats: p.threats }),
-      false, null, { search: true, actions: bduCount < 227 ? [complete] : [] }));
+      false, null, { search: true, actions: [complete] }));
   };
   draw();
   return box;

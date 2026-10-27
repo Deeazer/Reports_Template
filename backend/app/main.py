@@ -164,7 +164,9 @@ def delete_user(uid: int, db: Session = Depends(get_db),
 # --------------------------------------------------------------------------
 @app.get("/api/settings")
 def read_settings(db: Session = Depends(get_db), _: models.User = Depends(current_user)):
-    return get_all_settings(db)
+    data = get_all_settings(db)
+    data.pop("bdu", None)   # перечень БДУ отдаётся отдельно (/api/bdu)
+    return data
 
 
 @app.put("/api/settings/{key}")
@@ -173,13 +175,41 @@ def write_setting(key: str, value: dict | list = Body(...), db: Session = Depend
     return {"key": key, "value": set_setting(db, key, value)}
 
 
-_BDU = __import__("json").load(open(os.path.join(os.path.dirname(__file__), "bdu.json"), encoding="utf-8"))
+def _bdu(db):
+    """Перечень БДУ: загруженный администратором (thrlist.xlsx), иначе встроенный."""
+    from .crud_settings import get_setting
+    return get_setting(db, "bdu") or refdata.BDU
 
 
 @app.get("/api/bdu")
-def read_bdu(_: models.User = Depends(current_user)):
-    """Перечень угроз БДУ ФСТЭК России (УБИ.001–УБИ.227) для подстановки наименований."""
-    return _BDU
+def read_bdu(db: Session = Depends(get_db), _: models.User = Depends(current_user)):
+    """Перечень угроз БДУ ФСТЭК России для подстановки наименований."""
+    b = _bdu(db)
+    return {"source": b.get("source"), "retrieved": b.get("retrieved"), "threats": b["threats"]}
+
+
+@app.post("/api/settings/bdu-import")
+def import_bdu(file: UploadFile = File(...), db: Session = Depends(get_db),
+               admin: models.User = Depends(require_admin)):
+    """Загрузка thrlist.xlsx с bdu.fstec.ru: обновляет перечень БДУ, дополняет каталог
+    угроз по умолчанию и каталоги всех проектов (заполняются только пустые поля)."""
+    from .bdu_import import parse_thrlist
+    try:
+        bdu = parse_thrlist(file.file.read())
+    except Exception as e:
+        raise HTTPException(400, f"Не удалось прочитать файл: {e}")
+    set_setting(db, "bdu", bdu)
+    settings = get_all_settings(db)
+    set_setting(db, "threats", refdata.complete_threats(settings.get("threats"), bdu))
+    changed = 0
+    for p in db.query(models.Project):
+        full = refdata.complete_threats(p.threats, bdu)
+        if full != (p.threats or []):
+            p.threats = full
+            audit.log(db, admin, p.id, "project", p.id, "update", p.name, ["threats"])
+            changed += 1
+    db.commit()
+    return {"ok": True, "threats": len(bdu["threats"]), "retrieved": bdu["retrieved"], "projects_updated": changed}
 
 
 @app.get("/api/refdata")
@@ -264,7 +294,7 @@ def create_project(data: schemas.ProjectCreate, db: Session = Depends(get_db),
         # интерфейсы редактируются вручную, актуальные угрозы (1.8.3)
         # формируются автоматически из уязвимостей, выбирающих угрозы каталога.
         interfaces=s.get("interfaces", refdata.DEFAULT_INTERFACES),
-        threats=refdata.complete_threats(s.get("threats", refdata.DEFAULT_THREATS)),
+        threats=refdata.complete_threats(s.get("threats", refdata.DEFAULT_THREATS), _bdu(db)),
         tools=s.get("tools", refdata.DEFAULT_TOOLS),
         executors=[],
     )
@@ -338,10 +368,10 @@ def complete_project_threats(pid: int, db: Session = Depends(get_db),
                              user: models.User = Depends(current_user)):
     """Дополняет каталог угроз проекта всеми угрозами БДУ, которых в нём нет."""
     p = _load_project(db, pid, user)
-    before = len(p.threats or [])
-    p.threats = refdata.complete_threats(p.threats)
-    added = len(p.threats) - before
-    if added:
+    before = p.threats or []
+    p.threats = refdata.complete_threats(before, _bdu(db))
+    added = len(p.threats) - len(before)
+    if p.threats != before:
         _touch(p, user)
         audit.log(db, user, p.id, "project", p.id, "update", p.name, ["threats"])
     db.commit(); db.refresh(p)

@@ -356,20 +356,38 @@ import re as _re
 BDU = _json.load(open(_os.path.join(_os.path.dirname(__file__), "bdu.json"), encoding="utf-8"))
 
 
-def complete_threats(catalog):
-    """Дополняет каталог угроз недостающими угрозами БДУ (без дублей по номеру УБИ).
+THREAT_FIELDS = ("interfaces", "intruders", "properties", "consequences")
+
+
+def _bdu_fields(bdu, bdu_id):
+    from .bdu_import import threat_fields
+    d = (bdu.get("details") or {}).get(bdu_id)
+    return threat_fields(d) if d else {}
+
+
+def complete_threats(catalog, bdu=None):
+    """Дополняет каталог угроз недостающими угрозами БДУ (без дублей по номеру УБИ)
+    и заполняет пустые поля (интерфейсы, нарушители, свойства, последствия)
+    по официальным данным БДУ. Заполненные вручную значения не меняются.
 
     Новые угрозы получают коды У-NN, продолжая нумерацию каталога."""
+    bdu = bdu or BDU
     catalog = [dict(t) for t in (catalog or [])]
+    for t in catalog:
+        fields = _bdu_fields(bdu, (t.get("bdu") or "").strip().upper())
+        for k in THREAT_FIELDS:
+            if not str(t.get(k) or "").strip() and fields.get(k):
+                t[k] = fields[k]
     have = {(t.get("bdu") or "").strip().upper() for t in catalog}
     nums = [int(m.group(1)) for t in catalog for m in [_re.match(r"У-(\d+)$", t.get("code") or "")] if m]
     n = max(nums, default=0)
-    for bdu_id, name in BDU["threats"].items():
+    for bdu_id, name in bdu["threats"].items():
         if bdu_id.upper() in have:
             continue
         n += 1
-        catalog.append({"code": f"У-{n:02d}", "name": name, "bdu": bdu_id, "interfaces": "",
-                        "intruders": "", "properties": "", "consequences": ""})
+        fields = _bdu_fields(bdu, bdu_id)
+        catalog.append({"code": f"У-{n:02d}", "name": name, "bdu": bdu_id,
+                        **{k: fields.get(k, "") for k in THREAT_FIELDS}})
     return catalog
 
 

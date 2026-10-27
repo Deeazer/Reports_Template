@@ -24,13 +24,30 @@ export async function renderSettings() {
     return { input, el: h("label", { class: "row", style: { padding: "4px 0" } }, input, " " + label), key };
   };
   const c1 = cb("include_fstec_v", "Добавлять в карточку уязвимости уровень критичности по методике ФСТЭК (V)", true);
-  const c2 = cb("include_risk_stats", "Добавлять таблицу 3.2 «Количество уязвимостей по уровням риска»", true);
+  const c2 = cb("include_risk_stats", "Добавлять таблицу 3.2 «Количество уязвимостей по уровням опасности»", true);
   const confLabel = h("input", { value: rep.confidential_label || "Конфиденциально" });
   wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("h3", { style: { marginTop: 0 } }, "Параметры отчёта"),
     c1.el, c2.el,
     field("Текст грифа в колонтитуле", confLabel),
     h("button", { class: "btn", onclick: async () => { try { await api.saveSetting("report", { include_fstec_v: c1.input.checked, include_risk_stats: c2.input.checked, confidential_label: confLabel.value }); toast("Сохранено"); } catch (e) { toast(e.message, true); } } }, "Сохранить")));
+
+  // Перечень угроз БДУ ФСТЭК России (импорт thrlist.xlsx)
+  const bduInfo = h("span", { class: "muted" });
+  api.bdu().then(b => { bduInfo.textContent = `Сейчас: ${Object.keys(b.threats).length} угроз, выгрузка от ${b.retrieved || "—"}.`; }).catch(() => {});
+  const bduFile = h("input", { type: "file", accept: ".xlsx", style: { display: "none" }, onchange: async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const r = await api.importBdu(f);
+      toast(`Загружено угроз: ${r.threats}; обновлено проектов: ${r.projects_updated}`);
+      bduInfo.textContent = `Сейчас: ${r.threats} угроз, выгрузка от ${r.retrieved}.`;
+    } catch (x) { toast(x.message, true); }
+    e.target.value = "";
+  } });
+  wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+    h("h3", { style: { marginTop: 0 } }, "Перечень угроз БДУ ФСТЭК России"),
+    h("p", { class: "muted" }, "Загрузите файл thrlist.xlsx с bdu.fstec.ru (раздел «Угрозы» → выгрузка в Excel). Каталог угроз по умолчанию и каталоги проектов дополнятся новыми угрозами; у угроз заполнятся пустые поля — нарушители (по источнику угрозы), нарушаемые свойства, последствия и интерфейсы (по объекту воздействия). Заполненные вручную значения не меняются."),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => bduFile.click() }, "Загрузить thrlist.xlsx"), bduInfo, bduFile)));
 
   // Справочники по умолчанию (JSON редактор)
   const sections = [
