@@ -109,7 +109,6 @@ export function vulnCard(v, onChange, onDelete, index, project) {
   const fstecSel = (table, key, label) => field(label, select(ref.fstec[table].map(o => ({ value: o.key, label: o.name })), v[key], field_(key), { placeholder: "— не выбрано —" }));
 
   const inp = (key, ph) => h("input", { value: v[key] || "", placeholder: ph || "", oninput: e => field_(key)(e.target.value) });
-  const txt = (key, ph) => h("textarea", { placeholder: ph || "", oninput: e => field_(key)(e.target.value) }, v[key] || "");
   // форматированный текст со скриншотами внутри (block — к какому блоку относятся загружаемые файлы)
   const rich = (key, block, ph) => richEditor({
     value: v[key],
@@ -132,7 +131,7 @@ export function vulnCard(v, onChange, onDelete, index, project) {
       field("Границы", inp("scope", "домен / IP / endpoint")),
       field("Инструменты", inp("tools", "BurpSuite, nmap…")),
     ),
-    field("Описание", txt("description")),
+    field("Описание", rich("description", "description", "Опишите уязвимость. Можно добавлять таблицы, код и скриншоты.")),
     h("div", { class: "cols2" },
       field("Время обнаружения", inp("detected_at", "05.09.2026 12:30")),
       field("Модели нарушителя", inp("intruder_models", "Н1, Н2")),

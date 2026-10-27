@@ -124,9 +124,19 @@ tr:hover td{background:#fafbfc}
 .vuln .body{counter-reset:fig}
 .rich{margin-bottom:8px}
 .rich .ql-toolbar.ql-snow{border-radius:8px 8px 0 0;border-color:var(--line2,#ddd);background:#fafafa}
-.rich .ql-container.ql-snow{border-radius:0 0 8px 8px;border-color:var(--line2,#ddd);font-family:inherit;font-size:14px}
-.rich .ql-editor{min-height:110px;max-height:640px;overflow:auto}
-.rich .ql-editor code,.rich .ql-editor .ql-code-block-container{font-family:Consolas,"Courier New",monospace;font-size:13px}
+.rich .ql-container.ql-snow{border-radius:0 0 8px 8px;border-color:var(--line2,#ddd);font-size:14px}
+/* основной текст описаний — Times New Roman (как в отчёте), код — Courier New */
+.rich .ql-editor{min-height:110px;max-height:640px;overflow:auto;font-family:"Times New Roman",Times,serif;font-size:15px}
+.rich .ql-editor code,.rich .ql-editor .ql-code-block-container{font-family:"Courier New",Courier,monospace;font-size:13px}
+/* панель управления таблицами */
+.rich-tablebar{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:4px 8px;background:#fafafa;
+  border-left:1px solid var(--line2,#ddd);border-right:1px solid var(--line2,#ddd);border-bottom:1px solid #eee}
+.rich-tbl-lbl{font-size:12px;color:var(--muted);margin-right:2px}
+.rich-tbl-btn{background:#fff;border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:12px;color:var(--text)}
+.rich-tbl-btn:hover{background:var(--bg)}
+/* таблицы внутри редактора */
+.rich .ql-editor table{border-collapse:collapse;margin:8px 0;width:auto}
+.rich .ql-editor td{border:1px solid #999;padding:4px 8px;min-width:48px;font-family:"Times New Roman",Times,serif}
 .rich .ql-editor .ql-code-block-container{background:#f4f4f4;color:#222;border-radius:6px;padding:6px 10px}
 .rich .ql-editor code{background:#f0f0f0;padding:1px 4px;border-radius:3px}
 .rich figure.ql-fig{margin:10px auto;text-align:center;user-select:none}

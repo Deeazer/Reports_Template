@@ -75,6 +75,7 @@ export function richEditor({ value, legacyImages = [], upload, onChange, placeho
     theme: "snow",
     placeholder: placeholder || "",
     modules: {
+      table: true,   // таблицы (вставка, добавление и удаление строк/столбцов)
       toolbar: {
         container: [["bold", "italic", "underline"], ["code", "code-block"],
                     [{ list: "ordered" }, { list: "bullet" }], ["image"], ["clean"]],
@@ -85,6 +86,30 @@ export function richEditor({ value, legacyImages = [], upload, onChange, placeho
     },
   });
   fileInput.addEventListener("change", async (e) => { await insertFiles([...e.target.files]); e.target.value = ""; });
+
+  // панель управления таблицами (встроенный модуль Quill)
+  const table = quill.getModule("table");
+  const emit = () => onChange(JSON.stringify(quill.getContents()));
+  const tbtn = (label, title, fn, needCell = true) => h("button", {
+    type: "button", class: "rich-tbl-btn", title,
+    onclick: (e) => {
+      e.preventDefault();
+      if (needCell && !quill.getModule("table").getTable()[0]) { toast("Поставьте курсор в ячейку таблицы", true); return; }
+      try { fn(quill.getModule("table")); quill.focus(); emit(); }
+      catch (err) { toast("Не удалось выполнить действие с таблицей", true); }
+    },
+  }, label);
+  const tableBar = h("div", { class: "rich-tablebar" },
+    h("span", { class: "rich-tbl-lbl" }, "Таблица:"),
+    tbtn("вставить", "Вставить таблицу 2×2", (m) => m.insertTable(2, 2), false),
+    tbtn("+ строка", "Добавить строку ниже", (m) => m.insertRowBelow()),
+    tbtn("+ столбец", "Добавить столбец справа", (m) => m.insertColumnRight()),
+    tbtn("− строка", "Удалить текущую строку", (m) => m.deleteRow()),
+    tbtn("− столбец", "Удалить текущий столбец", (m) => m.deleteColumn()),
+    tbtn("удалить", "Удалить таблицу целиком", (m) => m.deleteTable()),
+  );
+  const toolbarEl = holder.querySelector(".ql-toolbar");
+  if (toolbarEl) toolbarEl.after(tableBar); else holder.insertBefore(tableBar, editorEl);
 
   // подсказки на кнопках
   const tips = { "ql-bold": "Жирный", "ql-italic": "Курсив", "ql-underline": "Подчёркнутый", "ql-code": "Код в строке (моноширинный шрифт)",

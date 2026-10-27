@@ -385,7 +385,28 @@ def _vuln_card(doc, v, upload_dir, include_fstec, ref=None):
         H.set_cell_width(row.cells[1], 125)
         return row
 
-    kv("Описание", v.get("description", ""))
+    # сквозная нумерация рисунков по разделу уязвимости (описание + PoC + результаты)
+    figures = RT.FigureCounter(ref)
+
+    def rich_row(label, key, block):
+        row = t.add_row()
+        H.fill_cell(row.cells[0], label, bold=True, size=11)
+        H.set_cell_width(row.cells[0], 55)
+        H.set_cell_width(row.cells[1], 125)
+        cell = row.cells[1]
+        for pr in list(cell.paragraphs):   # убрать стандартный пустой абзац ячейки
+            pr._p.getparent().remove(pr._p)
+        value = v.get(key) or ""
+        RT.render(cell, value, figures, _image_path, size=11)
+        if RT.parse(value) is None:
+            imgs = sorted([im for im in v.get("images", []) if im.get("block") == block],
+                          key=lambda x: x.get("order_index", 0))
+            RT.legacy_images(cell, imgs, figures, _image_path)
+        if not cell.paragraphs and not cell._element.findall(qn("w:tbl")):
+            cell.add_paragraph()
+        return row
+
+    rich_row("Описание", "description", "description")
     kv("Границы", v.get("scope", ""))
     kv("Инструменты", v.get("tools", ""))
     kv("Время обнаружения", v.get("detected_at", ""))
@@ -416,8 +437,8 @@ def _vuln_card(doc, v, upload_dir, include_fstec, ref=None):
            f"V = {fstec['value']}  ({fstec['level']})", bold=True)
 
     # PoC, результаты, рекомендации: форматированный текст со скриншотами внутри;
-    # рисунки нумеруются по разделу уязвимости (Рисунок 4.1.1, 4.1.2, …)
-    figures = RT.FigureCounter(ref)
+    # рисунки нумеруются по разделу уязвимости (Рисунок 4.1.1, 4.1.2, …),
+    # продолжая сквозную нумерацию, начатую в описании
     for key, label, block in (("poc", "Proof of Concept", "poc"),
                               ("exploitation_result", "Результаты эксплуатации уязвимости", "result"),
                               ("recommendations", "Рекомендации", "rec")):
