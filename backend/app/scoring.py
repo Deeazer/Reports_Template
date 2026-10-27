@@ -343,8 +343,27 @@ def dos_security(dos: dict | None) -> tuple[str, list[str], list[str]]:
     return level, dis, adv
 
 
+def wireless_security(wireless: dict | None) -> tuple[str, list[str], list[str]]:
+    """Уровень защищённости, недостатки и преимущества для таблицы 1.4.x (беспроводные сети)."""
+    results = (wireless or {}).get("results") or []
+    if not results:
+        return "Не определён", [], []
+    breached = [r for r in results if r.get("outcome") == "success"]
+    dis, adv = [], []
+    if breached:
+        level = "Низкий"
+        for r in breached:
+            title = (r.get("title") or "беспроводная сеть").strip()
+            dis.append(f"Успешная атака на {title}")
+    else:
+        level = "Высокий"
+        adv.append("Проникновение в инфраструктуру через беспроводные сети не удалось")
+    return level, dis, adv
+
+
 def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None,
-                   social: dict | None = None, dos: dict | None = None) -> dict:
+                   social: dict | None = None, dos: dict | None = None,
+                   wireless: dict | None = None) -> dict:
     """vulns — список уязвимостей с уже вычисленными производными полями.
 
     Возвращает данные для:
@@ -426,6 +445,12 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
             security[wt] = {"title": R.WORK_TYPES[wt]["summary_title"], "level": level,
                             "disadvantages": dis, "advantages": manual + auto_adv,
                             "manual_advantages": manual, "count": len((dos or {}).get("stages") or [])}
+            continue
+        if R.WORK_TYPES[wt].get("kind") == "wireless":
+            level, dis, auto_adv = wireless_security(wireless or {})
+            security[wt] = {"title": R.WORK_TYPES[wt]["summary_title"], "level": level,
+                            "disadvantages": dis, "advantages": manual + auto_adv,
+                            "manual_advantages": manual, "count": len((wireless or {}).get("networks") or [])}
             continue
         ws_vulns = [v for v in vulns if v.get("work_type") == wt]
         # недостатки — все уязвимости, кроме информативных, по убыванию риска

@@ -4,6 +4,7 @@ import { h, field, select, toast, confirmModal, confirmTyped, badge, debouncePat
 import { vulnCard } from "./vuln.js";
 import { socialTab } from "./social.js";
 import { dosTab } from "./dos.js";
+import { wirelessTab } from "./wireless.js";
 import { historyTab } from "./history.js";
 
 export async function renderProject(pid) {
@@ -88,6 +89,7 @@ export async function renderProject(pid) {
       const kind = ref.work_types[wt].kind;
       content.append(kind === "social" ? socialTab(p, refreshMeta)
         : kind === "dos" ? dosTab(p, refreshMeta)
+        : kind === "wireless" ? wirelessTab(p, refreshMeta)
         : vulnsTab(p, wt, onChanged));
     }
   }

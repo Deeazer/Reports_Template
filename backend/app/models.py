@@ -69,6 +69,9 @@ class Project(Base):
     # тестирование отказа в обслуживании: {"intro": str, "stages": [{id,host,start,end,
     #   duration,method,power,outcome,description,result}], "recommendations": str}
     dos = Column(JSON, default=dict)
+    # анализ защищённости беспроводных сетей: {"intro": str, "networks": [{id,ssid,protocol,note}],
+    #   "survey": str, "results": [{id,title,outcome,description}], "recommendations": str}
+    wireless = Column(JSON, default=dict)
     created_by = Column(Integer, ForeignKey("users.id"))
     updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

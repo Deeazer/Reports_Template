@@ -97,6 +97,7 @@ class ProjectUpdate(BaseModel):
     security_notes: Optional[dict] = None
     social: Optional[dict] = None
     dos: Optional[dict] = None
+    wireless: Optional[dict] = None
     member_ids: Optional[list[int]] = None
 
 

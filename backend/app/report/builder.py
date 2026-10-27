@@ -393,6 +393,25 @@ def _section_summary(doc, p, summary, settings):
                 H.new_paragraph(doc, f"Исследуемые ресурсы сохранили доступность при всех проведённых атаках. "
                                      f"Подробности приведены в разделе {sec}.", align=L)
 
+    if "wireless" in p["work_types"]:
+        ov += 1
+        num = f"3.{ov}"
+        w = p.get("wireless") or {}
+        results = w.get("results") or []
+        sec = summary["section_no"]["wireless"]
+        H.heading2(doc, "Результаты анализа защищённости беспроводных сетей", num)
+        if not results:
+            H.new_paragraph(doc, "Результаты анализа не внесены.", align=L, italic=True)
+        else:
+            breached = [r for r in results if r.get("outcome") == "success"]
+            if breached:
+                titles = ", ".join((r.get("title") or "беспроводная сеть").strip() for r in breached)
+                H.new_paragraph(doc, f"Выявлены успешные атаки на беспроводные сети: {titles}. "
+                                     f"Подробности приведены в разделе {sec}.", align=L)
+            else:
+                H.new_paragraph(doc, f"Проникновение в инфраструктуру через беспроводные сети не удалось. "
+                                     f"Подробности приведены в разделе {sec}.", align=L)
+
 
 # ==========================================================================
 # Разделы по видам работ + карточки
@@ -503,6 +522,9 @@ def _work_sections(doc, p, summary, settings):
             continue
         if info.get("kind") == "dos":
             _dos_section(doc, p, sec_no)
+            continue
+        if info.get("kind") == "wireless":
+            _wireless_section(doc, p, sec_no)
             continue
         ids = order.get(wt, [])
         vmap = {v["id"]: v for v in vulns_by_wt.get(wt, [])}
@@ -720,6 +742,81 @@ def _dos_section(doc, p, sec):
                     align=L, first_line=False)
     for i, r_ in enumerate(recs):
         H.bullet(doc, r_ + (";" if i < len(recs) - 1 else "."))
+
+
+# ==========================================================================
+# Анализ защищённости беспроводных сетей
+# ==========================================================================
+def _wireless_networks_table(doc, networks):
+    t = _make_table(doc, 3)
+    _header_row(t, ["№", "Беспроводная сеть", "Описание / протокол"], widths=[14, 90, 76])
+    for i, nw in enumerate(networks, 1):
+        row = t.add_row()
+        H.fill_cell(row.cells[0], str(i), align=C, size=10)
+        H.fill_cell(row.cells[1], (nw.get("ssid") or "").strip(), size=10)
+        H.fill_cell(row.cells[2], (nw.get("protocol") or "").strip()
+                    + (f" — {nw['note'].strip()}" if (nw.get("note") or "").strip() else ""), size=10)
+
+
+def _wireless_section(doc, p, sec):
+    w = p.get("wireless") or {}
+    networks = w.get("networks") or []
+    results = w.get("results") or []
+    img = lambda i: _image_path(f"p{i}")
+
+    n = 1
+    H.heading2(doc, "Цели обследования беспроводных сетей", f"{sec}.{n}")
+    intro = w.get("intro") or ""
+    if intro:
+        RT.render(doc, intro, RT.FigureCounter(f"{sec}.{n}"), img, size=11)
+    else:
+        H.new_paragraph(doc, "Целью анализа защищённости беспроводных сетей являлось выявление недостатков "
+                             "в использовании точек доступа и клиентских устройств Wi-Fi, а также недостатков "
+                             "в архитектуре и организации беспроводного доступа.", align=L)
+        H.new_paragraph(doc, "В рамках обследования беспроводных сетей было проведено:", align=L, first_line=False)
+        for i, txt in enumerate(["выявление беспроводных точек доступа, анализ их конфигурации и настроек безопасности",
+                                 "анализ возможности проведения атак и их проведение с использованием обнаруженных недостатков",
+                                 "проверка возможности проникновения в корпоративную инфраструктуру через выявленные сети"]):
+            H.bullet(doc, txt + (";" if i < 2 else "."))
+
+    n += 1
+    H.heading2(doc, "Область действия", f"{sec}.{n}")
+    if networks:
+        H.new_paragraph(doc, f"Информация о выявленных беспроводных сетях приведена в таблице {sec}.{n}.1.", align=L)
+        H.caption(doc, f"Таблица {sec}.{n}.1 – Информация о беспроводных сетях")
+        _wireless_networks_table(doc, networks)
+    else:
+        H.new_paragraph(doc, "Информация о выявленных беспроводных сетях не внесена.", align=L, italic=True)
+
+    n += 1
+    H.heading2(doc, "Анализ защищённости беспроводных сетей", f"{sec}.{n}")
+    survey = w.get("survey") or ""
+    if survey:
+        RT.render(doc, survey, RT.FigureCounter(f"{sec}.{n}"), img, size=11)
+    else:
+        H.new_paragraph(doc, "Описание процесса анализа не внесено.", align=L, italic=True)
+
+    n += 1
+    H.heading2(doc, "Результаты анализа защищённости беспроводных сетей", f"{sec}.{n}")
+    if not results:
+        H.new_paragraph(doc, "Результаты анализа не внесены.", align=L, italic=True)
+    else:
+        for j, r in enumerate(results, 1):
+            title = (r.get("title") or f"Группа {j}").strip()
+            H.heading3(doc, f"Результаты анализа защищённости {title}", f"{sec}.{n}.{j}")
+            if r.get("description"):
+                RT.render(doc, r["description"], RT.FigureCounter(f"{sec}.{n}.{j}"), img, size=11)
+            outcome = {"success": "успешно", "fail": "не успешно"}.get(r.get("outcome"))
+            if outcome:
+                H.new_paragraph(doc, f"Результат эксплуатации: {outcome}.", align=L)
+
+    recs = [x.strip() for x in (w.get("recommendations") or "").split("\n") if x.strip()]
+    if recs:
+        n += 1
+        H.heading2(doc, "Рекомендации", f"{sec}.{n}")
+        H.new_paragraph(doc, "Для повышения защищённости беспроводных сетей рекомендуется:", align=L, first_line=False)
+        for i, r_ in enumerate(recs):
+            H.bullet(doc, r_ + (";" if i < len(recs) - 1 else "."))
 
 
 # ==========================================================================

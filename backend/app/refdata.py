@@ -67,8 +67,6 @@ WORK_TYPES = {
         "kind": "dos",
         "enabled": True,
     },
-    # Виды работ ниже заведены в справочник, но пока не реализованы
-    # (enabled=False): их нельзя выбрать в проекте, раздел отчёта не строится.
     "wireless": {
         "title": "Анализ защищенности беспроводных сетей",
         "section_title": "Анализ защищенности беспроводных сетей",
@@ -76,7 +74,8 @@ WORK_TYPES = {
         "task": "анализ защищенности беспроводных сетей Заказчика",
         "default_p": "no_internet",
         "default_intruders": ["Н1"],
-        "enabled": False,
+        "kind": "wireless",
+        "enabled": True,
     },
 }
 
