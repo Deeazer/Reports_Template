@@ -78,15 +78,6 @@ WORK_TYPES = {
         "default_intruders": ["Н1"],
         "enabled": False,
     },
-    "load": {
-        "title": "Нагрузочное тестирование",
-        "section_title": "Нагрузочное тестирование",
-        "summary_title": "Общий уровень устойчивости к нагрузке",
-        "task": "нагрузочное тестирование информационных ресурсов Заказчика",
-        "default_p": "internet",
-        "default_intruders": ["Н1"],
-        "enabled": False,
-    },
 }
 
 
