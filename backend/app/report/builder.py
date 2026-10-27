@@ -28,6 +28,11 @@ C = WD_ALIGN_PARAGRAPH.CENTER
 L = WD_ALIGN_PARAGRAPH.LEFT
 
 
+# уровень опасности в таблице 3.2 — в мужском роде, как в шаблоне отчёта
+SEVERITY_LABEL = {"Критическая": "Критический", "Высокая": "Высокий", "Средняя": "Средний",
+                  "Низкая": "Низкий", "Информативная": "Информативный"}
+
+
 def _risk_color(level):
     return R.COLORS.get(level, "FFFFFF")
 
@@ -347,32 +352,33 @@ def _section_summary(doc, p, summary, settings):
                                        "Уязвимости не добавлены", align=C, italic=True)
 
     if settings.get("report", {}).get("include_risk_stats", True):
-        H.new_paragraph(doc, "Распределение выявленных уязвимостей по уровням итогового риска и видам "
+        H.new_paragraph(doc, "Распределение выявленных уязвимостей по уровням опасности и видам "
                              "работ представлено в таблице 3.2.", align=L)
-        H.caption(doc, "Таблица 3.2 – Количество выявленных уязвимостей по уровням риска")
+        H.caption(doc, "Таблица 3.2 – Количество выявленных уязвимостей по уровням опасности")
         wts = [wt for wt in p["work_types"] if R.WORK_TYPES.get(wt, {}).get("kind") == "vulns"]
         t = _make_table(doc, len(wts) + 2)
         first_w, total_w = 50, 25
         col_w = (180 - first_w - total_w) / max(len(wts), 1)
-        _header_row(t, ["Уровень итогового риска"] + [R.WORK_TYPES[wt]["title"] for wt in wts] + ["Всего"],
+        _header_row(t, ["Уровень опасности"] + [R.WORK_TYPES[wt]["title"] for wt in wts] + ["Всего"],
                     widths=[first_w] + [col_w] * len(wts) + [total_w])
-        by_wt = summary.get("counts_by_wt", {})
-        for lvl in ["Высокий", "Средний", "Низкий", "Информативный"]:
+        by_wt = summary.get("sev_counts_by_wt", {})
+        totals = summary.get("sev_counts", {})
+        for lvl in reversed(R.SEVERITY_LEVELS):
             row = t.add_row()
-            H.fill_cell(row.cells[0], lvl, bg=_risk_color(lvl))
+            H.fill_cell(row.cells[0], SEVERITY_LABEL[lvl], bg=_risk_color(lvl))
             for i, wt in enumerate(wts):
                 H.fill_cell(row.cells[i + 1], str(by_wt.get(wt, {}).get(lvl, 0)), align=C)
-            H.fill_cell(row.cells[-1], str(summary["counts"].get(lvl, 0)), align=C, bold=True)
+            H.fill_cell(row.cells[-1], str(totals.get(lvl, 0)), align=C, bold=True)
         row = t.add_row()
         H.fill_cell(row.cells[0], "Итого", bold=True)
         for i, wt in enumerate(wts):
             H.fill_cell(row.cells[i + 1], str(sum(by_wt.get(wt, {}).values())), bold=True, align=C)
-        H.fill_cell(row.cells[-1], str(sum(summary["counts"].values())), bold=True, align=C)
-        if summary.get("not_rated"):
-            n_nr = summary["not_rated"]
+        H.fill_cell(row.cells[-1], str(sum(totals.values())), bold=True, align=C)
+        if summary.get("sev_not_rated"):
+            n_nr = summary["sev_not_rated"]
             word = "уязвимости" if n_nr % 10 == 1 and n_nr % 100 != 11 else "уязвимостей"
-            H.new_paragraph(doc, f"Для {n_nr} {word} итоговый риск не определён (не заполнены критичность "
-                                 "или вероятность эксплуатации), в таблицу 3.2 они не включены.", align=L, italic=True)
+            H.new_paragraph(doc, f"Для {n_nr} {word} уровень опасности не определён (не задан вектор CVSS), "
+                                 "в таблицу 3.2 они не включены.", align=L, italic=True)
 
     if "social" in p["work_types"]:
         st = p.get("social_stats") or {}

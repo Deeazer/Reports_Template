@@ -15,7 +15,13 @@ export async function renderProject(pid) {
   const meta = h("div", { style: { marginTop: "4px" } });
   const refreshMeta = () => meta.replaceChildren(whoLine(p));
   const save = debouncePatch(async (patch) => {
-    try { Object.assign(p, await api.updateProject(pid, patch)); refreshMeta(); toast("Сохранено"); }
+    try {
+      const r = await api.updateProject(pid, patch);
+      // отправленные поля остаются локальными: редакторы держат ссылки на эти массивы,
+      // и замена их копией с сервера теряла бы следующие правки
+      for (const k of Object.keys(patch)) delete r[k];
+      Object.assign(p, r); refreshMeta(); toast("Сохранено");
+    }
     catch (e) { toast(e.message, true); }
   }, 700);
   refreshMeta();
@@ -209,18 +215,19 @@ function resultsTab(p, ref, save) {
   (sum.rows || []).forEach(r => t31.append(h("tr", {}, h("td", {}, r.title), h("td", {}, badge(r.final_risk)), h("td", {}, r.ref))));
   if (!(sum.rows || []).length) t31.append(h("tr", {}, h("td", { colspan: 3, class: "muted" }, "Уязвимости не добавлены")));
   // таблица 3.2
-  const levels = ["Высокий", "Средний", "Низкий", "Информативный"];
+  // таблица 3.2 — по уровню опасности (критичности CVSS)
+  const levels = [["Критическая", "Критический"], ["Высокая", "Высокий"], ["Средняя", "Средний"], ["Низкая", "Низкий"], ["Информативная", "Информативный"]];
   const vwts = p.work_types.filter(wt => ref.work_types[wt].kind === "vulns");
   const t32 = h("table");
-  t32.append(h("tr", {}, h("th", {}, "Уровень риска"), ...vwts.map(wt => h("th", {}, ref.work_types[wt].title)), h("th", {}, "Всего")));
-  levels.forEach(l => t32.append(h("tr", {}, h("td", {}, badge(l)),
-    ...vwts.map(wt => h("td", {}, String(((sum.counts_by_wt || {})[wt] || {})[l] || 0))),
-    h("td", {}, h("b", {}, String((sum.counts || {})[l] || 0))))));
+  t32.append(h("tr", {}, h("th", {}, "Уровень опасности"), ...vwts.map(wt => h("th", {}, ref.work_types[wt].title)), h("th", {}, "Всего")));
+  levels.forEach(([key, label]) => { const b = badge(key); b.textContent = label; t32.append(h("tr", {}, h("td", {}, b),
+    ...vwts.map(wt => h("td", {}, String(((sum.sev_counts_by_wt || {})[wt] || {})[key] || 0))),
+    h("td", {}, h("b", {}, String((sum.sev_counts || {})[key] || 0))))); });
   wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("b", {}, "Таблица 3.1 – Обнаруженные уязвимости по уровню риска"), h("div", { style: { marginTop: "8px" } }, t31)));
   wrap.append(h("div", { class: "card pad" },
-    h("b", {}, "Таблица 3.2 – Количество уязвимостей по уровням риска"), h("div", { style: { marginTop: "8px" } }, t32),
-    sum.not_rated ? h("p", { class: "muted", style: { fontSize: "12px" } }, `Без итогового риска (не заполнены CVSS или вероятность): ${sum.not_rated}. В таблицу 3.2 не входят.`) : ""));
+    h("b", {}, "Таблица 3.2 – Количество уязвимостей по уровням опасности"), h("div", { style: { marginTop: "8px" } }, t32),
+    sum.sev_not_rated ? h("p", { class: "muted", style: { fontSize: "12px" } }, `Без уровня опасности (не задан вектор CVSS): ${sum.sev_not_rated}. В таблицу 3.2 не входят.`) : ""));
   return wrap;
 }
 
@@ -255,10 +262,26 @@ function modelTab(p, ref, save) {
       p.interfaces, [["work_types", "Виды работ"], ["code", "№"], ["name", "Интерфейс"], ["intruders", "Нарушители"], ["description", "Описание"], ["note", "Примечание"]],
       { work_types: [...p.work_types], code: "", name: "", intruders: "", description: "", note: "" }, () => save({ interfaces: p.interfaces }), false, p.work_types),
     autoThreatsPreview(p),
-    jsonTable("Каталог угроз (из него уязвимости выбирают реализуемые угрозы)",
-      p.threats, [["code", "№"], ["name", "Угроза"], ["bdu", "БДУ"], ["interfaces", "Интерфейс (по умолч.)"], ["intruders", "Наруш."], ["consequences", "Последствия"]],
-      { code: "", name: "", bdu: "", interfaces: "", intruders: "", properties: "", consequences: "" }, () => save({ threats: p.threats })),
+    threatsCatalog(p, save),
   );
+}
+
+// Каталог угроз проекта: все угрозы БДУ; в отчёт (1.8.3) идут только связанные с уязвимостями
+function threatsCatalog(p, save) {
+  const box = h("div");
+  const draw = () => {
+    const bduCount = new Set((p.threats || []).map(t => (t.bdu || "").toUpperCase()).filter(Boolean)).size;
+    const complete = h("button", { class: "btn sm", onclick: async () => {
+      try { const r = await api.completeThreats(p.id); Object.assign(p, r); toast(`Добавлено угроз БДУ: ${r.threats_added}`); draw(); }
+      catch (e) { toast(e.message, true); }
+    } }, "Дополнить из БДУ");
+    box.replaceChildren(jsonTable(`Каталог угроз — ${p.threats.length} (из него уязвимости выбирают реализуемые угрозы; в отчёт попадают только связанные с уязвимостями)`,
+      p.threats, [["code", "№"], ["name", "Угроза"], ["bdu", "БДУ"], ["interfaces", "Интерфейс (по умолч.)"], ["intruders", "Наруш."], ["consequences", "Последствия"]],
+      { code: "", name: "", bdu: "", interfaces: "", intruders: "", properties: "", consequences: "" }, () => save({ threats: p.threats }),
+      false, null, { search: true, actions: bduCount < 227 ? [complete] : [] }));
+  };
+  draw();
+  return box;
 }
 
 // Предпросмотр таблицы 1.8.3 — что попадёт в отчёт (считается на бэкенде)
@@ -277,14 +300,18 @@ function autoThreatsPreview(p) {
   return card;
 }
 
-function jsonTable(title, rows, cols, template, onSave, expandable, projectWorkTypes) {
+function jsonTable(title, rows, cols, template, onSave, expandable, projectWorkTypes, opts = {}) {
   const card = h("div", { class: "card pad", style: { marginBottom: "16px" } });
   const tbl = h("table");
+  // поиск по строкам (для больших справочников, например каталога угроз БДУ)
+  let query = "";
+  const matches = (row) => !query || cols.some(([k]) => String(row[k] ?? "").toLowerCase().includes(query));
   const render = () => {
     tbl.replaceChildren();
     const head = h("tr", {}, ...cols.map(([k, l]) => h("th", {}, l)), h("th", { style: { width: "40px" } }, ""));
     tbl.append(head);
     rows.forEach((row, i) => {
+      if (!matches(row)) return;
       const tr = h("tr", {});
       const inputs = {};
       cols.forEach(([k]) => {
@@ -340,7 +367,10 @@ function jsonTable(title, rows, cols, template, onSave, expandable, projectWorkT
   render();
   card.append(h("div", { class: "between", style: { marginBottom: "8px" } },
     h("span", { style: { fontWeight: 700 } }, title),
-    h("button", { class: "btn sec sm", onclick: () => { rows.push(JSON.parse(JSON.stringify(template))); onSave(); render(); } }, "+ Строка")),
+    h("div", { class: "row" },
+      ...(opts.actions || []),
+      opts.search && h("input", { placeholder: "Поиск…", style: { width: "220px" }, oninput: e => { query = e.target.value.trim().toLowerCase(); render(); } }),
+      h("button", { class: "btn sec sm", onclick: () => { query = ""; rows.push(JSON.parse(JSON.stringify(template))); onSave(); render(); } }, "+ Строка"))),
     tbl);
   return card;
 }

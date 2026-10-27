@@ -264,7 +264,7 @@ def create_project(data: schemas.ProjectCreate, db: Session = Depends(get_db),
         # интерфейсы редактируются вручную, актуальные угрозы (1.8.3)
         # формируются автоматически из уязвимостей, выбирающих угрозы каталога.
         interfaces=s.get("interfaces", refdata.DEFAULT_INTERFACES),
-        threats=s.get("threats", refdata.DEFAULT_THREATS),
+        threats=refdata.complete_threats(s.get("threats", refdata.DEFAULT_THREATS)),
         tools=s.get("tools", refdata.DEFAULT_TOOLS),
         executors=[],
     )
@@ -331,6 +331,23 @@ def _touch(p, user):
     """Отмечает, кто и когда последним менял проект (в том числе его уязвимости)."""
     p.updated_by = user.id
     p.updated_at = datetime.utcnow()
+
+
+@app.post("/api/projects/{pid}/threats/complete")
+def complete_project_threats(pid: int, db: Session = Depends(get_db),
+                             user: models.User = Depends(current_user)):
+    """Дополняет каталог угроз проекта всеми угрозами БДУ, которых в нём нет."""
+    p = _load_project(db, pid, user)
+    before = len(p.threats or [])
+    p.threats = refdata.complete_threats(p.threats)
+    added = len(p.threats) - before
+    if added:
+        _touch(p, user)
+        audit.log(db, user, p.id, "project", p.id, "update", p.name, ["threats"])
+    db.commit(); db.refresh(p)
+    out = serializers.project_dict(p, settings_fstec=fstec_settings(db))
+    out["threats_added"] = added
+    return out
 
 
 @app.get("/api/projects/{pid}/history")

@@ -5,15 +5,26 @@ import { h, field, select, toast, badge, confirmModal, debouncePatch, whoLine } 
 // Мультивыбор кодов (угрозы/интерфейсы) из каталога проекта
 function multiPick(options, selected, onChange) {
   const chosen = new Set(selected || []);
-  const box = h("div", { style: { maxHeight: "150px", overflow: "auto", border: "1px solid var(--line2)", borderRadius: "8px", padding: "6px 10px" } });
-  if (!options.length) box.append(h("div", { class: "muted", style: { fontSize: "12px" } }, "Каталог пуст"));
-  options.forEach(o => {
-    const cb = h("input", { type: "checkbox", checked: chosen.has(o.code), style: { width: "auto", marginRight: "6px" },
-      onchange: e => { e.target.checked ? chosen.add(o.code) : chosen.delete(o.code); onChange([...chosen]); } });
-    box.append(h("label", { class: "row", style: { padding: "2px 0", alignItems: "flex-start", cursor: "pointer" } },
-      cb, h("span", { style: { fontSize: "12px" } }, h("b", {}, o.code + " "), o.label)));
-  });
-  return box;
+  const box = h("div", { style: { maxHeight: "180px", overflow: "auto", border: "1px solid var(--line2)", borderRadius: "8px", padding: "6px 10px" } });
+  let query = "";
+  const draw = () => {
+    box.replaceChildren();
+    if (!options.length) { box.append(h("div", { class: "muted", style: { fontSize: "12px" } }, "Каталог пуст")); return; }
+    // отмеченные — сверху, затем найденные по поиску
+    const list = options.filter(o => chosen.has(o.code))
+      .concat(options.filter(o => !chosen.has(o.code) && (!query || (o.code + " " + o.label).toLowerCase().includes(query))));
+    list.forEach(o => {
+      const cb = h("input", { type: "checkbox", checked: chosen.has(o.code), style: { width: "auto", marginRight: "6px" },
+        onchange: e => { e.target.checked ? chosen.add(o.code) : chosen.delete(o.code); onChange([...chosen]); } });
+      box.append(h("label", { class: "row", style: { padding: "2px 0", alignItems: "flex-start", cursor: "pointer" } },
+        cb, h("span", { style: { fontSize: "12px" } }, h("b", {}, o.code + " "), o.label)));
+    });
+  };
+  draw();
+  if (options.length <= 12) return box;
+  const search = h("input", { placeholder: `Поиск (${options.length})…`, style: { marginBottom: "4px" },
+    oninput: e => { query = e.target.value.trim().toLowerCase(); draw(); } });
+  return h("div", {}, search, box);
 }
 
 // Карточка уязвимости с живым пересчётом и загрузкой изображений

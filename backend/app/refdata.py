@@ -343,6 +343,36 @@ DEFAULT_THREATS = [
     {"code": "У-30", "name": "Угроза обнаружения открытых портов и идентификации привязанных к ним сетевых служб", "bdu": "УБИ.098", "interfaces": "И-05, И-08", "intruders": "Н1, Н2", "properties": "Конфиденциальность", "consequences": "Выявление уязвимых сетевых служб для последующей эксплуатации", "work_types": ["external", "internal"]},
 ]
 
+# --------------------------------------------------------------------------
+# Полный перечень угроз БДУ ФСТЭК России. Каталог проекта содержит все угрозы:
+# сначала размеченные выше (с интерфейсами и последствиями), затем остальные
+# из БДУ (наименование и номер УБИ). В таблицу 1.8.3 попадают только угрозы,
+# связанные с уязвимостями проекта.
+# --------------------------------------------------------------------------
+import json as _json
+import os as _os
+import re as _re
+
+BDU = _json.load(open(_os.path.join(_os.path.dirname(__file__), "bdu.json"), encoding="utf-8"))
+
+
+def complete_threats(catalog):
+    """Дополняет каталог угроз недостающими угрозами БДУ (без дублей по номеру УБИ).
+
+    Новые угрозы получают коды У-NN, продолжая нумерацию каталога."""
+    catalog = [dict(t) for t in (catalog or [])]
+    have = {(t.get("bdu") or "").strip().upper() for t in catalog}
+    nums = [int(m.group(1)) for t in catalog for m in [_re.match(r"У-(\d+)$", t.get("code") or "")] if m]
+    n = max(nums, default=0)
+    for bdu_id, name in BDU["threats"].items():
+        if bdu_id.upper() in have:
+            continue
+        n += 1
+        catalog.append({"code": f"У-{n:02d}", "name": name, "bdu": bdu_id, "interfaces": "",
+                        "intruders": "", "properties": "", "consequences": ""})
+    return catalog
+
+
 DEFAULT_TOOLS = [
     {"purpose": "Разведка и поиск сервисов", "tools": "wappalyzer, whatweb, web-browser (firefox, chromium)"},
     {"purpose": "Сканирование сети", "tools": "Nmap"},
@@ -377,6 +407,6 @@ DEFAULT_SETTINGS = {
     "tools": DEFAULT_TOOLS,
     "intruders": DEFAULT_INTRUDERS,
     "interfaces": DEFAULT_INTERFACES,
-    "threats": DEFAULT_THREATS,
+    "threats": complete_threats(DEFAULT_THREATS),
     "fstec": {"K": FSTEC_K, "L": FSTEC_L, "P": FSTEC_P, "E": FSTEC_E, "H": FSTEC_H, "weights": FSTEC_WEIGHTS},
 }

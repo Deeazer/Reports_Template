@@ -369,6 +369,20 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
         else:
             not_rated += 1
 
+    # таблица 3.2: количество по уровню опасности (критичности CVSS), включая критические
+    sev_levels = list(reversed(R.SEVERITY_LEVELS))   # Критическая … Информативная
+    sev_counts = {lvl: 0 for lvl in sev_levels}
+    sev_by_wt = {wt: {lvl: 0 for lvl in sev_levels} for wt in work_types}
+    sev_not_rated = 0
+    for v in vulns:
+        sv = v.get("severity")
+        if sv in sev_counts:
+            sev_counts[sv] += 1
+            if v.get("work_type") in sev_by_wt:
+                sev_by_wt[v["work_type"]][sv] += 1
+        else:
+            sev_not_rated += 1
+
     # общий уровень защищенности: Низкий, если есть Высокий риск; Средний — если Средний; иначе Высокий
     def security_level(ws_vulns):
         risks = {v.get("final_risk") for v in ws_vulns}
@@ -408,6 +422,9 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
         "counts": counts,
         "counts_by_wt": counts_by_wt,
         "not_rated": not_rated,
+        "sev_counts": sev_counts,
+        "sev_counts_by_wt": sev_by_wt,
+        "sev_not_rated": sev_not_rated,
         "total": len(vulns),
         "security": security,
         "section_no": section_no,

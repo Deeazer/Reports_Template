@@ -51,6 +51,7 @@ export const api = {
   createProject: (d) => req("POST", "/projects", d),
   updateProject: (id, d) => req("PATCH", "/projects/" + id, d),
   deleteProject: (id) => req("DELETE", "/projects/" + id),
+  completeThreats: (id) => req("POST", `/projects/${id}/threats/complete`),
   history: (id) => req("GET", `/projects/${id}/history`),
   uploadProjectImage: (pid, file, section, caption) => {
     const fd = new FormData(); fd.append("file", file); fd.append("section", section); fd.append("caption", caption || "");
