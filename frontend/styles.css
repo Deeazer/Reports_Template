@@ -114,3 +114,17 @@ tr:hover td{background:#fafbfc}
 .meta b{font-weight:600;color:var(--text,#333)}
 .hist td{font-size:13px;vertical-align:top}
 @media (max-width:700px){.cols3{grid-template-columns:1fr}}
+/* редактор PoC / результатов: рисунки с автонумерацией по карточке */
+.vuln .body{counter-reset:fig}
+.rich{margin-bottom:8px}
+.rich .ql-toolbar.ql-snow{border-radius:8px 8px 0 0;border-color:var(--line2,#ddd);background:#fafafa}
+.rich .ql-container.ql-snow{border-radius:0 0 8px 8px;border-color:var(--line2,#ddd);font-family:inherit;font-size:14px}
+.rich .ql-editor{min-height:110px;max-height:640px;overflow:auto}
+.rich .ql-editor code,.rich .ql-editor .ql-code-block-container{font-family:Consolas,"Courier New",monospace;font-size:13px}
+.rich .ql-editor .ql-code-block-container{background:#f4f4f4;color:#222;border-radius:6px;padding:6px 10px}
+.rich .ql-editor code{background:#f0f0f0;padding:1px 4px;border-radius:3px}
+.rich figure.ql-fig{margin:10px auto;text-align:center;user-select:none}
+.rich figure.ql-fig img{max-width:100%;max-height:420px;border:1px solid #ddd;border-radius:4px}
+.rich figure.ql-fig figcaption{counter-increment:fig;font-size:13px;color:#444;cursor:pointer;margin-top:4px}
+.rich figure.ql-fig figcaption::before{content:var(--fig-prefix,"Рисунок ") counter(fig) " – "}
+.rich figure.ql-fig figcaption:empty::after{content:"добавьте подпись";color:var(--muted,#999);font-style:italic}

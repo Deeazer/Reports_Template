@@ -22,6 +22,7 @@ from docx.oxml import OxmlElement
 
 from .. import refdata as R
 from . import docx_helpers as H
+from . import richtext as RT
 
 _APP2 = json.load(open(os.path.join(os.path.dirname(__file__), "appendix2.json"), encoding="utf-8"))
 C = WD_ALIGN_PARAGRAPH.CENTER
@@ -37,32 +38,10 @@ def _risk_color(level):
     return R.COLORS.get(level, "FFFFFF")
 
 
-def _add_image_block(doc, images, upload_dir):
-    for im in images:
-        path = os.path.join(upload_dir, _filename_for(im))
-        if not path or not os.path.exists(path):
-            continue
-        p = doc.add_paragraph(); p.alignment = C
-        p.paragraph_format.space_before = Pt(4)
-        try:
-            run = p.add_run()
-            run.add_picture(path, width=Mm(150))
-        except Exception:
-            continue
-        if im.get("caption"):
-            cap = doc.add_paragraph(); cap.alignment = C
-            cap.paragraph_format.space_after = Pt(6)
-            r = cap.add_run(im["caption"]); H._set_run(r, size=11)
-
-
 # builder работает со словарём image из serializers (url=/api/images/ID),
-# но нам нужен файл; передаём отдельную карту id->filename
+# но нам нужен файл на диске; передаём отдельную карту id->filename (см. _image_path)
 _IMG_MAP = {}
 _UPLOAD_DIR = ""
-
-
-def _filename_for(im):
-    return _IMG_MAP.get(im["id"], "")
 
 
 # --------------------------------------------------------------------------
@@ -396,7 +375,7 @@ def _section_summary(doc, p, summary, settings):
 # ==========================================================================
 # Разделы по видам работ + карточки
 # ==========================================================================
-def _vuln_card(doc, v, upload_dir, include_fstec):
+def _vuln_card(doc, v, upload_dir, include_fstec, ref=None):
     t = _make_table(doc, 2)
     def kv(label, value, **kw):
         row = t.add_row()
@@ -433,44 +412,28 @@ def _vuln_card(doc, v, upload_dir, include_fstec):
         kv("Уровень критичности по методике ФСТЭК",
            f"V = {fstec['value']}  ({fstec['level']})", bold=True)
 
-    # PoC
-    poc_imgs = [im for im in v.get("images", []) if im.get("block") == "poc"]
-    row = t.add_row()
-    cell = row.cells[0].merge(row.cells[1])
-    H.fill_cell(cell, "Proof of Concept", bold=True)
-    if v.get("poc"):
-        p = cell.add_paragraph(); p.paragraph_format.space_before = Pt(2)
-        H.add_runs(p, v["poc"], size=11)
-    _cell_images(cell, poc_imgs, upload_dir)
-
-    row = t.add_row()
-    cell = row.cells[0].merge(row.cells[1])
-    H.fill_cell(cell, "Результаты эксплуатации уязвимости", bold=True)
-    if v.get("exploitation_result"):
-        p = cell.add_paragraph(); H.add_runs(p, v["exploitation_result"], size=11)
-    _cell_images(cell, [im for im in v.get("images", []) if im.get("block") == "result"], upload_dir)
-
-    row = t.add_row()
-    cell = row.cells[0].merge(row.cells[1])
-    H.fill_cell(cell, "Рекомендации", bold=True)
-    if v.get("recommendations"):
-        p = cell.add_paragraph(); H.add_runs(p, v["recommendations"], size=11)
+    # PoC, результаты, рекомендации: форматированный текст со скриншотами внутри;
+    # рисунки нумеруются по разделу уязвимости (Рисунок 4.1.1, 4.1.2, …)
+    figures = RT.FigureCounter(ref)
+    for key, label, block in (("poc", "Proof of Concept", "poc"),
+                              ("exploitation_result", "Результаты эксплуатации уязвимости", "result"),
+                              ("recommendations", "Рекомендации", "rec")):
+        row = t.add_row()
+        cell = row.cells[0].merge(row.cells[1])
+        H.fill_cell(cell, label, bold=True)
+        value = v.get(key) or ""
+        RT.render(cell, value, figures, _image_path)
+        if RT.parse(value) is None:
+            # старая карточка: скриншоты загружены отдельно от текста
+            imgs = sorted([im for im in v.get("images", []) if im.get("block") == block],
+                          key=lambda x: x.get("order_index", 0))
+            RT.legacy_images(cell, imgs, figures, _image_path)
 
 
-def _cell_images(cell, images, upload_dir):
-    for im in images:
-        fname = _IMG_MAP.get(im["id"], "")
-        path = os.path.join(upload_dir, fname) if fname else ""
-        if not path or not os.path.exists(path):
-            continue
-        p = cell.add_paragraph(); p.alignment = C
-        try:
-            p.add_run().add_picture(path, width=Mm(115))
-        except Exception:
-            continue
-        if im.get("caption"):
-            cap = cell.add_paragraph(); cap.alignment = C
-            r = cap.add_run(im["caption"]); H._set_run(r, size=10)
+def _image_path(image_id):
+    fname = _IMG_MAP.get(image_id, "")
+    path = os.path.join(_UPLOAD_DIR, fname) if fname else ""
+    return path if path and os.path.exists(path) else None
 
 
 def _work_sections(doc, p, summary, settings):
@@ -502,7 +465,7 @@ def _work_sections(doc, p, summary, settings):
             if not v:
                 continue
             H.heading2(doc, v.get("title", "Без названия"), f"{sec_no}.{i}")
-            _vuln_card(doc, v, settings["_upload_dir"], include_fstec)
+            _vuln_card(doc, v, settings["_upload_dir"], include_fstec, f"{sec_no}.{i}")
 
 
 # ==========================================================================

@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { state } from "../main.js";
 import { h, field, select, toast, badge, confirmModal, debouncePatch, whoLine } from "../ui.js";
+import { richEditor } from "../richtext.js";
 
 // Мультивыбор кодов (угрозы/интерфейсы) из каталога проекта
 function multiPick(options, selected, onChange) {
@@ -42,6 +43,9 @@ export function vulnCard(v, onChange, onDelete, index, project) {
 
   const head = h("div", { class: "head", onclick: (e) => { if (e.target.closest("button")) return; open = !open; v._open = open; body.classList.toggle("hidden", !open); } });
   const body = h("div", { class: "body" + (open ? "" : " hidden") });
+  // номер раздела уязвимости в отчёте (4.1, 5.2, …) — префикс нумерации рисунков
+  const secRef = ((project.summary || {}).rows || []).find(r => r.id === v.id)?.ref;
+  body.style.setProperty("--fig-prefix", JSON.stringify(secRef ? `Рисунок ${secRef}.` : "Рисунок "));
 
   function refreshHead() {
     head.replaceChildren(
@@ -104,35 +108,18 @@ export function vulnCard(v, onChange, onDelete, index, project) {
 
   const fstecSel = (table, key, label) => field(label, select(ref.fstec[table].map(o => ({ value: o.key, label: o.name })), v[key], field_(key), { placeholder: "— не выбрано —" }));
 
-  const imgBlock = (block, title) => {
-    const list = h("div", { class: "imgs" });
-    const renderImgs = () => {
-      list.replaceChildren();
-      (v.images || []).filter(im => im.block === block).sort((a, b) => a.order_index - b.order_index).forEach(im => {
-        const cap = h("input", { value: im.caption, placeholder: "Рисунок — подпись", onchange: e => api.updateImage(im.id, e.target.value).catch(x => toast(x.message, true)) });
-        list.append(h("div", { class: "ic" },
-          h("img", { src: im.url }),
-          h("div", { class: "cap" }, cap,
-            h("button", { class: "btn danger sm", style: { marginTop: "4px", width: "100%" }, onclick: async () => { try { await api.deleteImage(im.id); v.images = v.images.filter(x => x.id !== im.id); renderImgs(); } catch (e) { toast(e.message, true); } } }, "Удалить")),
-        ));
-      });
-    };
-    renderImgs();
-    const fileInput = h("input", { type: "file", accept: "image/*", style: { display: "none" }, onchange: async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      try { const im = await api.uploadImage(v.id, f, block, ""); (v.images = v.images || []).push(im); renderImgs(); } catch (x) { toast(x.message, true); }
-      e.target.value = "";
-    } });
-    return h("div", { style: { marginTop: "6px" } },
-      h("div", { class: "between" }, h("span", { class: "muted", style: { fontWeight: 600 } }, title),
-        h("button", { class: "btn sec sm", onclick: () => fileInput.click() }, "+ Изображение")),
-      fileInput, list);
-  };
-
   const inp = (key, ph) => h("input", { value: v[key] || "", placeholder: ph || "", oninput: e => field_(key)(e.target.value) });
   const txt = (key, ph) => h("textarea", { placeholder: ph || "", oninput: e => field_(key)(e.target.value) }, v[key] || "");
+  // форматированный текст со скриншотами внутри (block — к какому блоку относятся загружаемые файлы)
+  const rich = (key, block, ph) => richEditor({
+    value: v[key],
+    legacyImages: (v.images || []).filter(im => im.block === block).sort((a, b) => a.order_index - b.order_index),
+    upload: async (file) => { const im = await api.uploadImage(v.id, file, block, ""); (v.images = v.images || []).push(im); return im; },
+    onChange: field_(key),
+    placeholder: ph,
+  });
 
-  body.append(
+  body.append(...[
     meta,
     computed,
     field("Название уязвимости", inp("title", "Напр.: Обход авторизации панели администратора")),
@@ -181,14 +168,14 @@ export function vulnCard(v, onChange, onDelete, index, project) {
       fstecSel("H", "fstec_h", "Последствия эксплуатации (H)"),
     ),
     h("div", { class: "sec-title", style: { fontSize: "13px" } }, "Proof of Concept"),
-    txt("poc"),
-    imgBlock("poc", "Изображения PoC"),
+    h("p", { class: "muted", style: { marginTop: "-6px", fontSize: "12px" } },
+      "Скриншоты вставляются в текст кнопкой на панели, через Ctrl+V или перетаскиванием; подпись — щелчком под рисунком. Код выделяется кнопками «<>» (в строке) и «блок кода»."),
+    rich("poc", "poc", "Шаги воспроизведения, запросы, ответы сервера…"),
     h("div", { class: "sec-title", style: { fontSize: "13px" } }, "Результаты эксплуатации"),
-    txt("exploitation_result"),
-    imgBlock("result", "Изображения результатов"),
+    rich("exploitation_result", "result"),
     h("div", { class: "sec-title", style: { fontSize: "13px" } }, "Рекомендации"),
-    txt("recommendations"),
-  );
+    rich("recommendations", "rec"),
+  ].filter(Boolean));
 
   refreshHead(); refreshComputed(); refreshAutoHint(); refreshMeta();
   container.append(head, body);
