@@ -93,6 +93,22 @@ OWASP_TOP10 = [
     {"key": "A10", "name": "A10:2021 – Server-Side Request Forgery (SSRF)"},
 ]
 
+# Категории OWASP Web Security Testing Guide (WSTG v4.2)
+OWASP_WSTG = [
+    {"key": "WSTG-INFO", "name": "WSTG-INFO – Information Gathering (сбор информации)"},
+    {"key": "WSTG-CONF", "name": "WSTG-CONF – Configuration and Deployment Management (конфигурация и развёртывание)"},
+    {"key": "WSTG-IDNT", "name": "WSTG-IDNT – Identity Management (управление идентификацией)"},
+    {"key": "WSTG-ATHN", "name": "WSTG-ATHN – Authentication (аутентификация)"},
+    {"key": "WSTG-ATHZ", "name": "WSTG-ATHZ – Authorization (авторизация)"},
+    {"key": "WSTG-SESS", "name": "WSTG-SESS – Session Management (управление сессиями)"},
+    {"key": "WSTG-INPV", "name": "WSTG-INPV – Input Validation (проверка вводимых данных)"},
+    {"key": "WSTG-ERRH", "name": "WSTG-ERRH – Error Handling (обработка ошибок)"},
+    {"key": "WSTG-CRYP", "name": "WSTG-CRYP – Cryptography (криптография)"},
+    {"key": "WSTG-BUSL", "name": "WSTG-BUSL – Business Logic (бизнес-логика)"},
+    {"key": "WSTG-CLNT", "name": "WSTG-CLNT – Client-side Testing (тестирование на стороне клиента)"},
+    {"key": "WSTG-APIT", "name": "WSTG-APIT – API Testing (тестирование API)"},
+]
+
 
 def enabled_work_types(keys):
     """Оставляет только известные и реализованные виды работ, в порядке справочника."""

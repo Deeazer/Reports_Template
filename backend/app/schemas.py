@@ -122,6 +122,7 @@ class VulnBase(BaseModel):
     exploitation_result: str = ""
     recommendations: str = ""
     owasp: str = ""
+    wstg: str = ""
 
 
 class VulnCreate(VulnBase):
@@ -150,4 +151,5 @@ class VulnUpdate(BaseModel):
     exploitation_result: Optional[str] = None
     recommendations: Optional[str] = None
     owasp: Optional[str] = None
+    wstg: Optional[str] = None
     order_index: Optional[int] = None

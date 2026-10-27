@@ -116,6 +116,7 @@ class Vulnerability(Base):
     exploitation_result = Column(Text, default="")
     recommendations = Column(Text, default="")
     owasp = Column(String(16), default="")                 # категория OWASP Top 10 (веб-приложения)
+    wstg = Column(String(16), default="")                  # категория OWASP WSTG (веб-приложения)
     created_by = Column(Integer, ForeignKey("users.id"))
     updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

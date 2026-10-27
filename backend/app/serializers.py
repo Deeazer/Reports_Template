@@ -36,6 +36,7 @@ def vuln_dict(v: "models.Vulnerability", settings_fstec=None) -> dict:
         "exploitation_result": v.exploitation_result,
         "recommendations": v.recommendations,
         "owasp": v.owasp or "",
+        "wstg": v.wstg or "",
         "created_by": v.created_by,
         "created_by_name": _name(v.creator),
         "updated_by": v.updated_by,

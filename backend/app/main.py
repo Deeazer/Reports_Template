@@ -225,6 +225,7 @@ def read_refdata(_: models.User = Depends(current_user)):
         "colors": refdata.COLORS,
         "cvss_metrics": _cvss_options(),
         "owasp_top10": refdata.OWASP_TOP10,
+        "owasp_wstg": refdata.OWASP_WSTG,
     }
 
 

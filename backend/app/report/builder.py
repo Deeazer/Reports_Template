@@ -400,6 +400,9 @@ def _vuln_card(doc, v, upload_dir, include_fstec, ref=None):
     if v.get("work_type") == "web" and v.get("owasp"):
         owasp = {o["key"]: o["name"] for o in R.OWASP_TOP10}
         kv("Категория OWASP Top 10", owasp.get(v["owasp"], v["owasp"]))
+    if v.get("work_type") == "web" and v.get("wstg"):
+        wstg = {o["key"]: o["name"] for o in R.OWASP_WSTG}
+        kv("Категория OWASP WSTG", wstg.get(v["wstg"], v["wstg"]))
 
     fstec = v.get("fstec")
     if include_fstec and fstec:

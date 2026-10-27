@@ -14,7 +14,7 @@ const FIELD_LABELS = {
   cvss_vector: "CVSS", intruder_models: "модели нарушителя", threat_codes: "угрозы БДУ",
   interface_codes: "интерфейсы", availability: "доступность", ease: "простота эксплуатации",
   fstec_k: "K", fstec_l: "L", fstec_p: "P", fstec_e: "E", fstec_h: "H", poc: "Proof of Concept",
-  exploitation_result: "результаты эксплуатации", recommendations: "рекомендации", owasp: "категория OWASP",
+  exploitation_result: "результаты эксплуатации", recommendations: "рекомендации", owasp: "категория OWASP Top 10", wstg: "категория OWASP WSTG",
   order_index: "порядок", work_type: "вид работ", images_poc: "изображения PoC", images_result: "изображения результатов",
 };
 const ACTIONS = { create: "добавил", update: "изменил", delete: "удалил" };
