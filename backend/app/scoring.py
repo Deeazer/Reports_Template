@@ -502,9 +502,9 @@ def _sort_codes(codes):
 
 
 def _interfaces_for(work_type, interfaces):
-    """Коды интерфейсов, относящихся к виду работ (интерфейс без work_types — общий)."""
+    """Коды интерфейсов, у которых отмечен данный вид работ."""
     return {i.get("code") for i in (interfaces or [])
-            if not i.get("work_types") or work_type in i.get("work_types")}
+            if work_type in (i.get("work_types") or [])}
 
 
 def auto_threat_codes(v: dict, threat_catalog: list[dict]) -> list[str]:
@@ -592,10 +592,11 @@ def actual_threats(vulns: list[dict], threat_catalog: list[dict], interfaces: li
 
 # --------------------------------------------------------------------------
 # Интерфейсы воздействия (таблица 1.8.2) определяются видами работ проекта:
-# в отчёт попадают интерфейсы каталога, у которых в work_types есть хотя бы
-# один вид работ проекта. Интерфейс без work_types считается общим.
+# в отчёт попадают только интерфейсы, у которых отмечен хотя бы один вид работ
+# проекта (как и обещает подсказка в интерфейсе: строка без отмеченных видов
+# работ в отчёт не попадёт).
 # --------------------------------------------------------------------------
 def active_interfaces(interfaces: list[dict], work_types: list[str]) -> list[dict]:
     wts = set(work_types or [])
     return [i for i in (interfaces or [])
-            if not i.get("work_types") or wts & set(i.get("work_types"))]
+            if wts & set(i.get("work_types") or [])]
