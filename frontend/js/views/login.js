@@ -1,7 +1,7 @@
 import { h, field, toast } from "../ui.js";
 
 export function renderLogin(onLogin) {
-  const login = h("input", { placeholder: "Логин", value: "admin" });
+  const login = h("input", { placeholder: "Логин" });
   const pass = h("input", { type: "password", placeholder: "Пароль" });
   const btn = h("button", { class: "btn", style: { width: "100%" } }, "Войти");
   const submit = async () => {
@@ -20,6 +20,5 @@ export function renderLogin(onLogin) {
       field("Логин", login),
       field("Пароль", pass),
       btn,
-      h("p", { style: { marginTop: "16px", fontSize: "12px" } }, "По умолчанию: admin / admin"),
     ));
 }
