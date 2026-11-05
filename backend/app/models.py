@@ -72,6 +72,9 @@ class Project(Base):
     # анализ защищённости беспроводных сетей: {"intro": str, "networks": [{id,ssid,protocol,note}],
     #   "survey": str, "results": [{id,title,outcome,description}], "recommendations": str}
     wireless = Column(JSON, default=dict)
+    # режим сортировки уязвимостей по видам работ: {work_type: "auto"|"manual"}.
+    # auto (по умолчанию) — по уровню риска; manual — порядок задан перетаскиванием.
+    vuln_sort = Column(JSON, default=dict)
     created_by = Column(Integer, ForeignKey("users.id"))
     updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

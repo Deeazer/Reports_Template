@@ -78,6 +78,7 @@ def project_dict(p: "models.Project", with_vulns=True, settings_fstec=None) -> d
         "social": p.social or {},
         "dos": p.dos or {},
         "wireless": p.wireless or {},
+        "vuln_sort": p.vuln_sort or {},
         "images": [{"id": im.id, "section": im.section, "caption": im.caption,
                     "order_index": im.order_index, "url": f"/api/project-images/{im.id}"}
                    for im in p.images],
@@ -94,7 +95,8 @@ def project_dict(p: "models.Project", with_vulns=True, settings_fstec=None) -> d
         vulns = [vuln_dict(v, settings_fstec) for v in p.vulns]
         d["vulns"] = vulns
         d["summary"] = scoring.summary_tables(vulns, p.work_types or [], p.security_notes or {},
-                                              d["social_stats"], d["dos"], d["wireless"])
+                                              d["social_stats"], d["dos"], d["wireless"],
+                                              vuln_sort=p.vuln_sort or {})
         for v in vulns:
             # угрозы, которые будут подобраны, если в карточке ничего не отмечено
             v["auto_threat_codes"] = scoring.auto_threat_codes(v, p.threats or [])

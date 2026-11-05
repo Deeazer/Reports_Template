@@ -87,6 +87,9 @@ tr:hover td{background:#fafbfc}
 .vuln>.head .t{font-weight:600;flex:1}
 .vuln>.body{padding:16px;border-top:1px solid var(--line);background:#fcfcfd}
 .vuln .num{color:var(--muted);font-weight:700;min-width:34px}
+.vuln .drag-handle{cursor:grab;color:var(--muted);font-size:18px;line-height:1;user-select:none;padding:0 2px}
+.vuln .drag-handle:active{cursor:grabbing}
+.vuln.dragging{opacity:.5;outline:2px dashed var(--accent)}
 
 /* cvss */
 .cvss{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}

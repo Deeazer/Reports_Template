@@ -429,6 +429,32 @@ def add_vuln(pid: int, data: schemas.VulnCreate, db: Session = Depends(get_db),
     return serializers.vuln_dict(v, fstec_settings(db))
 
 
+@app.put("/api/projects/{pid}/vulns/order")
+def reorder_vulns(pid: int, data: schemas.VulnReorder, db: Session = Depends(get_db),
+                  user: models.User = Depends(current_user)):
+    """Задать ручной порядок уязвимостей вида работ (drag-and-drop).
+
+    Проставляет order_index по позиции в списке и переводит вид работ в режим
+    ручной сортировки (vuln_sort[work_type] = "manual")."""
+    p = _load_project(db, pid, user)
+    vulns = {v.id: v for v in p.vulns if v.work_type == data.work_type}
+    for i, vid in enumerate(data.order):
+        v = vulns.get(vid)
+        if v is not None:
+            v.order_index = i
+    # хвост (id не из списка) — сохраняем после переданных
+    tail = [v for vid, v in vulns.items() if vid not in set(data.order)]
+    for j, v in enumerate(sorted(tail, key=lambda x: x.order_index), start=len(data.order)):
+        v.order_index = j
+    sort = dict(p.vuln_sort or {})
+    sort[data.work_type] = "manual"
+    p.vuln_sort = sort
+    _touch(p, user)
+    audit.log(db, user, pid, "project", pid, "update", p.name, ["vuln_sort"])
+    db.commit()
+    return serializers.project_dict(p, with_vulns=True, settings_fstec=fstec_settings(db))
+
+
 @app.patch("/api/vulns/{vid}")
 def update_vuln(vid: int, data: schemas.VulnUpdate, db: Session = Depends(get_db),
                 user: models.User = Depends(current_user)):

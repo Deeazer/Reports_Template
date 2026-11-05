@@ -387,30 +387,84 @@ function toolsTab(p, save) {
 }
 
 // ---------- Уязвимости по виду работ ----------
+// ранги для автосортировки (совпадают с бэкендом): сначала по итоговому риску,
+// затем по критичности CVSS — наиболее опасные сверху
+const RISK_RANK = { "Высокий": 0, "Средний": 1, "Низкий": 2, "Информативный": 3 };
+const SEV_RANK = { "Критическая": 0, "Высокая": 1, "Средняя": 2, "Низкая": 3, "Информативная": 4 };
+
 function vulnsTab(p, wt, onChanged) {
   const box = h("div", {});
   const list = h("div", {});
-  const vulns = () => p.vulns.filter(v => v.work_type === wt).sort((a, b) => a.order_index - b.order_index);
+  const mode = () => (p.vuln_sort || {})[wt] || "auto";
+
+  const vulns = () => {
+    const vs = p.vulns.filter(v => v.work_type === wt);
+    if (mode() === "manual") return vs.sort((a, b) => a.order_index - b.order_index);
+    return vs.sort((a, b) =>
+      (RISK_RANK[a.final_risk] ?? 4) - (RISK_RANK[b.final_risk] ?? 4) ||
+      (SEV_RANK[a.severity] ?? 5) - (SEV_RANK[b.severity] ?? 5));
+  };
 
   const reload = async () => {
     try { Object.assign(p, await api.project(p.id)); draw(); } catch (e) { toast(e.message, true); }
   };
+  const persistOrder = async (ids) => {
+    try { Object.assign(p, await api.reorderVulns(p.id, wt, ids)); onChanged && onChanged(); draw(); }
+    catch (e) { toast(e.message, true); }
+  };
+  const setAuto = async () => {
+    try { Object.assign(p, await api.updateProject(p.id, { vuln_sort: { ...(p.vuln_sort || {}), [wt]: "auto" } })); onChanged && onChanged(); draw(); }
+    catch (e) { toast(e.message, true); }
+  };
+
+  let dragId = null;
   const draw = () => {
     list.replaceChildren();
+    sortCtl.replaceChildren(sortControl());
     const vs = vulns();
-    if (!vs.length) list.append(h("div", { class: "empty" }, "Уязвимости не добавлены"));
-    vs.forEach((v, i) => list.append(vulnCard(v, () => onChanged && onChanged(), reload, i, p)));
+    if (!vs.length) { list.append(h("div", { class: "empty" }, "Уязвимости не добавлены")); return; }
+    vs.forEach((v, i) => {
+      const card = vulnCard(v, () => onChanged && onChanged(), reload, i, p);
+      // перетаскивание: тянем за «ручку», чтобы не мешать выделению текста в полях
+      const handle = h("span", { class: "drag-handle", title: "Перетащите, чтобы изменить порядок" }, "⠿");
+      handle.addEventListener("click", e => e.stopPropagation());
+      handle.addEventListener("mousedown", () => { card.draggable = true; });
+      const resetDrag = () => { card.draggable = false; card.classList.remove("dragging"); };
+      card.addEventListener("mouseup", resetDrag);
+      card.addEventListener("dragstart", e => { dragId = v.id; card.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+      card.addEventListener("dragend", () => { dragId = null; resetDrag(); });
+      card.addEventListener("dragover", e => { if (dragId != null && dragId !== v.id) e.preventDefault(); });
+      card.addEventListener("drop", e => {
+        e.preventDefault();
+        if (dragId == null || dragId === v.id) return;
+        const ids = vulns().map(x => x.id);
+        const from = ids.indexOf(dragId), to = ids.indexOf(v.id);
+        if (from < 0 || to < 0) return;
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        persistOrder(ids);
+      });
+      const head = card.querySelector(".head");
+      if (head) head.prepend(handle);
+      list.append(card);
+    });
   };
-  draw();
 
-  box.append(h("div", { class: "between", style: { marginBottom: "12px" } },
+  const sortControl = () => mode() === "manual"
+    ? h("div", { class: "row", style: { gap: "8px", alignItems: "center" } },
+        h("span", { class: "muted", style: { fontSize: "12px" } }, "Порядок задан вручную (перетаскиванием)."),
+        h("button", { class: "btn sec sm", onclick: setAuto }, "↕ По критичности"))
+    : h("span", { class: "muted", style: { fontSize: "12px" } }, "Сортировка: по степени критичности (автоматически). Перетащите карточку, чтобы задать порядок вручную.");
+  const sortCtl = h("div", { style: { marginBottom: "10px" } });
+
+  box.append(h("div", { class: "between", style: { marginBottom: "6px" } },
     h("div", {}, h("b", {}, state.ref.work_types[wt].title),
       h("span", { class: "muted" }, "  —  каждая уязвимость попадает в сводные таблицы автоматически")),
     h("button", { class: "btn", onclick: async () => {
       try { const v = await api.addVuln(p.id, { work_type: wt, title: "Новая уязвимость" }); v._open = true; p.vulns.push(v); draw(); }
       catch (e) { toast(e.message, true); }
     } }, "+ Добавить уязвимость")),
-    list);
+    sortCtl, list);
+  draw();
   return box;
 }
 

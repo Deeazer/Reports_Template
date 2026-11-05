@@ -363,7 +363,7 @@ def wireless_security(wireless: dict | None) -> tuple[str, list[str], list[str]]
 
 def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dict | None = None,
                    social: dict | None = None, dos: dict | None = None,
-                   wireless: dict | None = None) -> dict:
+                   wireless: dict | None = None, vuln_sort: dict | None = None) -> dict:
     """vulns — список уязвимостей с уже вычисленными производными полями.
 
     Возвращает данные для:
@@ -374,26 +374,32 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
     ({work_type: {"advantages": [str]}}); дополняются автоматическими.
     """
     security_notes = security_notes or {}
-    ordered = sorted(
-        vulns,
-        key=lambda x: (RISK_ORDER.get(x.get("final_risk"), 4), SEV_ORDER.get(x.get("severity"), 5)),
-    )
+    vuln_sort = vuln_sort or {}
+    # порядок уязвимостей внутри вида работ определяет и нумерацию разделов отчёта,
+    # и порядок карточек в интерфейсе:
+    #   "auto" (по умолчанию) — по уровню риска, затем по критичности CVSS;
+    #   "manual" — заданный вручную порядок (order_index, drag-and-drop).
+    def _auto_key(x):
+        return (RISK_ORDER.get(x.get("final_risk"), 4), SEV_ORDER.get(x.get("severity"), 5))
+
     # нумерация ссылок в отчёте: раздел на вид работ, порядковый номер внутри
     section_no = {}
     base = 4
     for wt in work_types:
         section_no[wt] = base
         base += 1
-    counters = {wt: 0 for wt in work_types}
     rows = []
-    for v in ordered:
-        wt = v.get("work_type")
-        if wt not in counters:
-            continue
-        counters[wt] += 1
-        ref = f"{section_no[wt]}.{counters[wt]}"
-        rows.append({"id": v.get("id"), "title": v.get("title"), "final_risk": v.get("final_risk"),
-                     "ref": ref, "work_type": wt})
+    for wt in work_types:
+        wt_vulns = [v for v in vulns if v.get("work_type") == wt]
+        if vuln_sort.get(wt) == "manual":
+            wt_vulns.sort(key=lambda x: (x.get("order_index", 0), _auto_key(x)))
+        else:
+            wt_vulns.sort(key=_auto_key)
+        for i, v in enumerate(wt_vulns, 1):
+            rows.append({"id": v.get("id"), "title": v.get("title"), "final_risk": v.get("final_risk"),
+                         "ref": f"{section_no[wt]}.{i}", "work_type": wt})
+    # таблица 3.1 всегда ранжируется по уровню риска (ссылки — на фактические разделы)
+    rows_by_risk = sorted(rows, key=lambda r: RISK_ORDER.get(r.get("final_risk"), 4))
 
     counts = {lvl: 0 for lvl in R.RISK_LEVELS}
     # распределение по уровням риска в разрезе видов работ (таблица 3.2)
@@ -470,6 +476,7 @@ def summary_tables(vulns: list[dict], work_types: list[str], security_notes: dic
 
     return {
         "rows": rows,
+        "rows_by_risk": rows_by_risk,
         "counts": counts,
         "counts_by_wt": counts_by_wt,
         "not_rated": not_rated,

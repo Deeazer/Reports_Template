@@ -98,6 +98,7 @@ class ProjectUpdate(BaseModel):
     social: Optional[dict] = None
     dos: Optional[dict] = None
     wireless: Optional[dict] = None
+    vuln_sort: Optional[dict] = None
     member_ids: Optional[list[int]] = None
 
 
@@ -129,6 +130,11 @@ class VulnBase(BaseModel):
 
 class VulnCreate(VulnBase):
     pass
+
+
+class VulnReorder(BaseModel):
+    work_type: str
+    order: list[int]            # id уязвимостей в нужном порядке
 
 
 class VulnUpdate(BaseModel):

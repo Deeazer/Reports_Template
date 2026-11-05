@@ -321,7 +321,7 @@ def _section_summary(doc, p, summary, settings):
     H.caption(doc, "Таблица 3.1 – Обнаруженные уязвимости по уровню риска")
     t = _make_table(doc, 3)
     _header_row(t, ["Уязвимость", "Итоговый риск", "Ссылка в отчете"], widths=[120, 30, 30])
-    for r_ in summary["rows"]:
+    for r_ in summary.get("rows_by_risk") or summary["rows"]:
         row = t.add_row()
         H.fill_cell(row.cells[0], r_["title"], size=11)
         H.fill_cell(row.cells[1], r_["final_risk"], align=C, bg=_risk_color(r_["final_risk"]), size=11)

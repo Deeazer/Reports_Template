@@ -62,6 +62,7 @@ export const api = {
   deleteProjectImage: (id) => req("DELETE", "/project-images/" + id),
 
   addVuln: (pid, d) => req("POST", `/projects/${pid}/vulns`, d),
+  reorderVulns: (pid, work_type, order) => req("PUT", `/projects/${pid}/vulns/order`, { work_type, order }),
   updateVuln: (id, d) => req("PATCH", "/vulns/" + id, d),
   deleteVuln: (id) => req("DELETE", "/vulns/" + id),
 
