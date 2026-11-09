@@ -42,6 +42,14 @@ export const api = {
   saveSetting: (key, value) => req("PUT", "/settings/" + key, value),
   importBdu: (file) => { const fd = new FormData(); fd.append("file", file); return req("POST", "/settings/bdu-import", fd, true); },
 
+  // интеграция с Yonote
+  yonoteConfig: () => req("GET", "/integrations/yonote/config"),
+  yonoteSaveConfig: (d) => req("PUT", "/integrations/yonote/config", d),
+  yonoteTest: () => req("POST", "/integrations/yonote/test"),
+  yonoteCollections: () => req("GET", "/integrations/yonote/collections"),
+  yonoteDocuments: (cid) => req("GET", "/integrations/yonote/documents" + (cid ? "?collection_id=" + encodeURIComponent(cid) : "")),
+  yonoteImport: (ids) => req("POST", "/integrations/yonote/import", { document_ids: ids }),
+
   users: () => req("GET", "/users"),
   createUser: (d) => req("POST", "/users", d),
   updateUser: (id, d) => req("PATCH", "/users/" + id, d),
