@@ -19,7 +19,7 @@ from .security import (current_user, require_admin, can_access_project,
 from .config import ADMIN_LOGIN, ADMIN_PASSWORD, UPLOAD_DIR
 from .report import build_report
 from .integrations.yonote import YonoteClient, YonoteError
-from .integrations.yonote_import import parse_project, parse_vuln
+from .integrations.yonote_import import parse_project, parse_vuln, extract_images
 
 app = FastAPI(title="Генератор отчётов по пентесту", version="1.0")
 
@@ -168,7 +168,10 @@ def delete_user(uid: int, db: Session = Depends(get_db),
 def read_settings(db: Session = Depends(get_db), _: models.User = Depends(current_user)):
     data = get_all_settings(db)
     data.pop("bdu", None)      # перечень БДУ отдаётся отдельно (/api/bdu)
-    data.pop("yonote", None)   # настройки интеграции — только админу, через свой эндпоинт
+    data.pop("yonote", None)   # настройки интеграции — через свой эндпоинт
+    # персональные токены Yonote (yonote_token:<id>) наружу не отдаём
+    for k in [k for k in data if str(k).startswith("yonote_token:")]:
+        data.pop(k, None)
     return data
 
 
@@ -219,78 +222,98 @@ def import_bdu(file: UploadFile = File(...), db: Session = Depends(get_db),
 # Интеграция с Yonote (yonote.ru)
 # --------------------------------------------------------------------------
 def _yonote_cfg(db) -> dict:
+    """Общие настройки интеграции (адрес пространства и коллекция по умолчанию).
+    Задаёт администратор; токен сюда НЕ входит — он персональный."""
     from .crud_settings import get_setting
     return get_setting(db, "yonote") or {}
 
 
-def _yonote_client(db) -> YonoteClient:
-    cfg = _yonote_cfg(db)
-    if not cfg.get("base_url") or not cfg.get("token"):
-        raise HTTPException(400, "Интеграция с Yonote не настроена: укажите адрес и API-токен")
-    return YonoteClient(cfg["base_url"], cfg["token"])
+def _yonote_token(db, user) -> str:
+    """Персональный API-токен пользователя (каждый указывает свой)."""
+    from .crud_settings import get_setting
+    rec = get_setting(db, f"yonote_token:{user.id}")
+    return (rec.get("token") or "").strip() if isinstance(rec, dict) else ""
+
+
+def _yonote_client(db, user) -> YonoteClient:
+    """Клиент Yonote: общий адрес + персональный токен текущего пользователя."""
+    base = (_yonote_cfg(db).get("base_url") or "").strip()
+    token = _yonote_token(db, user)
+    if not base:
+        raise HTTPException(400, "Адрес Yonote не настроен администратором "
+                                 "(Настройки → Интеграция с Yonote)")
+    if not token:
+        raise HTTPException(400, "Укажите свой персональный API-токен Yonote "
+                                 "в настройках (Настройки → Интеграция с Yonote)")
+    return YonoteClient(base, token)
 
 
 @app.get("/api/integrations/yonote/config")
-def yonote_get_config(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
-    """Настройки интеграции. Токен не возвращается — только признак его наличия."""
+def yonote_get_config(db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    """Настройки интеграции. Адрес и коллекция — общие (меняет админ); токен
+    персональный, наружу не отдаётся — только признак его наличия у этого
+    пользователя."""
     cfg = _yonote_cfg(db)
     return {"base_url": cfg.get("base_url", ""), "collection_id": cfg.get("collection_id", ""),
-            "has_token": bool(cfg.get("token"))}
+            "has_token": bool(_yonote_token(db, user)), "is_admin": user.role == "admin"}
 
 
 @app.put("/api/integrations/yonote/config")
 def yonote_set_config(data: schemas.YonoteConfig, db: Session = Depends(get_db),
-                      _: models.User = Depends(require_admin)):
-    cfg = dict(_yonote_cfg(db))
-    if data.base_url is not None:
-        cfg["base_url"] = data.base_url.strip()
-    if data.collection_id is not None:
-        cfg["collection_id"] = data.collection_id.strip()
-    # токен обновляем только если прислан непустой (пустой — оставить прежний)
+                      user: models.User = Depends(current_user)):
+    # персональный токен: сохраняем только непустой (пустой — оставить прежний)
     if data.token:
-        cfg["token"] = data.token.strip()
-    set_setting(db, "yonote", cfg)
+        set_setting(db, f"yonote_token:{user.id}", {"token": data.token.strip()})
+    # адрес и коллекция по умолчанию — общие, менять может только админ
+    if user.role == "admin" and (data.base_url is not None or data.collection_id is not None):
+        cfg = dict(_yonote_cfg(db))
+        if data.base_url is not None:
+            cfg["base_url"] = data.base_url.strip()
+        if data.collection_id is not None:
+            cfg["collection_id"] = data.collection_id.strip()
+        set_setting(db, "yonote", cfg)
+    cfg = _yonote_cfg(db)
     return {"base_url": cfg.get("base_url", ""), "collection_id": cfg.get("collection_id", ""),
-            "has_token": bool(cfg.get("token"))}
+            "has_token": bool(_yonote_token(db, user)), "is_admin": user.role == "admin"}
 
 
 @app.post("/api/integrations/yonote/test")
-def yonote_test(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+def yonote_test(db: Session = Depends(get_db), user: models.User = Depends(current_user)):
     try:
-        return {"ok": True, **_yonote_client(db).auth_info()}
+        return {"ok": True, **_yonote_client(db, user).auth_info()}
     except YonoteError as e:
         raise HTTPException(400, str(e))
 
 
 @app.get("/api/integrations/yonote/collections")
-def yonote_collections(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+def yonote_collections(db: Session = Depends(get_db), user: models.User = Depends(current_user)):
     try:
-        return {"collections": _yonote_client(db).collections()}
+        return {"collections": _yonote_client(db, user).collections()}
     except YonoteError as e:
         raise HTTPException(400, str(e))
 
 
 @app.get("/api/integrations/yonote/documents")
 def yonote_documents(collection_id: str = "", db: Session = Depends(get_db),
-                     _: models.User = Depends(require_admin)):
+                     user: models.User = Depends(current_user)):
     cid = collection_id or _yonote_cfg(db).get("collection_id") or ""
     if not cid:
         raise HTTPException(400, "Не выбрана коллекция Yonote")
     try:
-        return {"documents": _yonote_client(db).documents(cid)}
+        return {"documents": _yonote_client(db, user).documents(cid)}
     except YonoteError as e:
         raise HTTPException(400, str(e))
 
 
 @app.get("/api/integrations/yonote/tree")
 def yonote_tree(collection_id: str = "", db: Session = Depends(get_db),
-                _: models.User = Depends(require_admin)):
+                user: models.User = Depends(current_user)):
     """Дерево документов коллекции — для навигации к документам-уязвимостям."""
     cid = collection_id or _yonote_cfg(db).get("collection_id") or ""
     if not cid:
         raise HTTPException(400, "Не выбрана коллекция Yonote")
     try:
-        return {"tree": _yonote_client(db).tree(cid)}
+        return {"tree": _yonote_client(db, user).tree(cid)}
     except YonoteError as e:
         raise HTTPException(400, str(e))
 
@@ -343,7 +366,7 @@ def yonote_import(data: schemas.YonoteImport, db: Session = Depends(get_db),
     """Импорт выбранных документов Yonote как проектов приложения (с уязвимостями)."""
     if not data.document_ids:
         raise HTTPException(400, "Не выбрано ни одного документа")
-    client = _yonote_client(db)
+    client = _yonote_client(db, user)
     results = []
     for did in data.document_ids:
         try:
@@ -365,6 +388,46 @@ def yonote_import(data: schemas.YonoteImport, db: Session = Depends(get_db),
 _VULN_IMPORT_FIELDS = {"title", "description", "scope", "tools", "detected_at", "cvss_vector",
                        "intruder_models", "poc", "exploitation_result", "recommendations", "owasp", "wstg"}
 
+_IMG_EXT_BY_CT = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+                  "image/gif": ".gif", "image/webp": ".webp", "image/bmp": ".bmp"}
+
+
+def _save_bytes_image(content: bytes, url: str, content_type: str) -> str:
+    """Сохраняет скачанную картинку в UPLOAD_DIR, возвращает имя файла."""
+    ext = _IMG_EXT_BY_CT.get((content_type or "").lower())
+    if not ext:
+        ext = os.path.splitext(url.split("?")[0])[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
+        ext = ".png"
+    fname = f"{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
+        f.write(content)
+    return fname
+
+
+def _import_block_images(db, client, vuln, md_text: str, block: str):
+    """Выносит картинки из markdown-блока (PoC/результаты): скачивает каждую,
+    сохраняет и привязывает к уязвимости как VulnImage. Возвращает текст без
+    картинок и число привязанных изображений. Недоступные картинки пропускает."""
+    clean, images = extract_images(md_text or "")
+    n = db.query(models.VulnImage).filter_by(vuln_id=vuln.id, block=block).count()
+    saved = 0
+    for img in images:
+        try:
+            content, ct = client.fetch_file(img["url"])
+        except YonoteError:
+            continue
+        if not content:
+            continue
+        fname = _save_bytes_image(content, img["url"], ct)
+        db.add(models.VulnImage(vuln_id=vuln.id, filename=fname,
+                                orig_name=(img["url"].split("/")[-1].split("?")[0] or fname)[:512],
+                                caption=(img.get("caption") or "")[:1024],
+                                block=block, order_index=n))
+        n += 1
+        saved += 1
+    return clean, saved
+
 
 @app.post("/api/projects/{pid}/vulns/import-yonote")
 def yonote_import_vulns(pid: int, data: schemas.YonoteVulnImport, db: Session = Depends(get_db),
@@ -379,7 +442,7 @@ def yonote_import_vulns(pid: int, data: schemas.YonoteVulnImport, db: Session = 
         raise HTTPException(400, "У проекта нет видов работ — импортировать уязвимости некуда")
     forced = data.work_type if data.work_type in work_types else None
     default_wt = forced or work_types[0]
-    client = _yonote_client(db)
+    client = _yonote_client(db, user)
     # текущие счётчики порядка по видам работ
     base = {wt: db.query(models.Vulnerability).filter_by(project_id=pid, work_type=wt).count()
             for wt in work_types}
@@ -394,11 +457,18 @@ def yonote_import_vulns(pid: int, data: schemas.YonoteVulnImport, db: Session = 
             v = models.Vulnerability(project_id=pid, work_type=wt, order_index=n,
                                      created_by=user.id, updated_by=user.id, **fields)
             db.add(v); db.flush()
+            # картинки из PoC и результатов эксплуатации — скачиваем и привязываем,
+            # из текста блока ссылки убираем
+            imgs = 0
+            for field_name, block in (("poc", "poc"), ("exploitation_result", "result")):
+                clean, saved = _import_block_images(db, client, v, getattr(v, field_name) or "", block)
+                setattr(v, field_name, clean)
+                imgs += saved
             audit.log(db, user, pid, "vuln", v.id, "create", v.title)
             _touch(p, user)
             db.commit()
             results.append({"document_id": did, "ok": True, "vuln_id": v.id,
-                            "title": v.title, "work_type": wt})
+                            "title": v.title, "work_type": wt, "images": imgs})
         except YonoteError as e:
             db.rollback()
             results.append({"document_id": did, "ok": False, "error": str(e)})

@@ -225,6 +225,37 @@ _VULN_SKIP_KEYS = {"cvssv3.1", "cvss v3.1", "cvss", "вектор cvss", "век
                    "критичность", "уровень", "оценка"}
 
 
+# картинки в markdown: ![подпись](url "title") и html <img src="url" alt="подпись">
+_IMG_MD_RE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+_IMG_HTML_RE = re.compile(r"<img\b[^>]*?\bsrc=[\"']([^\"']+)[\"'][^>]*?>", re.IGNORECASE)
+_IMG_ALT_RE = re.compile(r"\balt=[\"']([^\"']*)[\"']", re.IGNORECASE)
+
+
+def extract_images(md: str) -> tuple[str, list[dict]]:
+    """Вынимает картинки из markdown-блока.
+
+    Возвращает (текст без картинок, [{"url":…, "caption":…}, …]) в порядке
+    появления. Нужна для импорта скриншотов PoC/результатов: сами картинки
+    скачиваются и привязываются к уязвимости, а из текста ссылки убираются,
+    чтобы не осталось «сырого» markdown."""
+    images: list[dict] = []
+
+    def _md(m):
+        images.append({"caption": (m.group(1) or "").strip(), "url": m.group(2).strip()})
+        return ""
+
+    def _html(m):
+        alt = _IMG_ALT_RE.search(m.group(0))
+        images.append({"caption": (alt.group(1).strip() if alt else ""), "url": m.group(1).strip()})
+        return ""
+
+    text = _IMG_MD_RE.sub(_md, md or "")
+    text = _IMG_HTML_RE.sub(_html, text)
+    # убираем пустые строки, оставшиеся от вырезанных картинок
+    text = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", text).strip()
+    return text, images
+
+
 def _strip_emoji(s: str) -> str:
     """Убирает ведущие значки/эмодзи и пробелы из заголовка."""
     return re.sub(r"^[\s\W_]*?(?=[\wА-Яа-яЁё])", "", s or "").strip() or (s or "").strip()

@@ -142,3 +142,30 @@ class YonoteClient:
         return {"id": d.get("id"), "title": d.get("title", ""),
                 "text": d.get("text", "") or "", "collectionId": d.get("collectionId"),
                 "updatedAt": d.get("updatedAt")}
+
+    def fetch_file(self, url: str) -> tuple[bytes, str]:
+        """Скачивает вложение Yonote (картинку из PoC/результатов) по ссылке из
+        markdown. Возвращает (содержимое, content-type).
+
+        Ссылка бывает относительной (``/api/attachments.redirect?id=…`` — нужен
+        токен и переход по redirect на подписанный URL) либо абсолютной. Для
+        своего хоста добавляем Bearer-токен; подписанные ссылки на сторонний
+        хост работают без него."""
+        root = self.api[:-4]  # отрезаем «/api» → корень пространства
+        if url.startswith("/"):
+            full = root + url
+        elif url.startswith("http://") or url.startswith("https://"):
+            full = url
+        else:
+            full = root + "/" + url
+        headers = {}
+        if full.startswith(root):
+            headers["Authorization"] = f"Bearer {self.token}"
+        try:
+            r = httpx.get(full, headers=headers, timeout=self.timeout,
+                          follow_redirects=True)
+        except httpx.HTTPError as e:
+            raise YonoteError(f"Не удалось скачать вложение Yonote: {e}") from e
+        if r.status_code >= 400:
+            raise YonoteError(f"Yonote вернул ошибку {r.status_code} при скачивании вложения")
+        return r.content, (r.headers.get("content-type") or "").split(";")[0].strip()

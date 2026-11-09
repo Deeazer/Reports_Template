@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, auth } from "../api.js";
 import { h, field, toast } from "../ui.js";
 
 export async function renderSettings() {
@@ -10,7 +10,7 @@ export async function renderSettings() {
   const ex = s.executor || { name: "", requisites: "" };
   const exName = h("input", { value: ex.name || "" });
   const exReq = h("textarea", { style: { minHeight: "140px" } }, ex.requisites || "");
-  wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+  if (auth.isAdmin) wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("h3", { style: { marginTop: 0 } }, "Реквизиты Исполнителя"),
     h("p", { class: "muted" }, "Подставляются в раздел 1.6 «Реквизиты сторон» всех новых отчётов."),
     field("Наименование организации", exName),
@@ -26,7 +26,7 @@ export async function renderSettings() {
   const c1 = cb("include_fstec_v", "Добавлять в карточку уязвимости уровень критичности по методике ФСТЭК (V)", true);
   const c2 = cb("include_risk_stats", "Добавлять таблицу 3.2 «Количество уязвимостей по уровням опасности»", true);
   const confLabel = h("input", { value: rep.confidential_label || "Конфиденциально" });
-  wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+  if (auth.isAdmin) wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("h3", { style: { marginTop: 0 } }, "Параметры отчёта"),
     c1.el, c2.el,
     field("Текст грифа в колонтитуле", confLabel),
@@ -44,7 +44,7 @@ export async function renderSettings() {
     } catch (x) { toast(x.message, true); }
     e.target.value = "";
   } });
-  wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
+  if (auth.isAdmin) wrap.append(h("div", { class: "card pad", style: { marginBottom: "16px" } },
     h("h3", { style: { marginTop: 0 } }, "Перечень угроз БДУ ФСТЭК России"),
     h("p", { class: "muted" }, "Загрузите файл thrlist.xlsx с bdu.fstec.ru (раздел «Угрозы» → выгрузка в Excel). Каталог угроз по умолчанию и каталоги проектов дополнятся новыми угрозами; у угроз заполнятся пустые поля — нарушители (по источнику угрозы), нарушаемые свойства, последствия и интерфейсы (по объекту воздействия). Заполненные вручную значения не меняются."),
     h("div", { class: "row" }, h("button", { class: "btn", onclick: () => bduFile.click() }, "Загрузить thrlist.xlsx"), bduInfo, bduFile)));
@@ -73,32 +73,39 @@ export async function renderSettings() {
         try { await api.saveSetting(key, val); toast("Сохранено"); } catch (e) { toast(e.message, true); }
       } }, "Сохранить")));
   });
-  wrap.append(jsonCard);
+  if (auth.isAdmin) wrap.append(jsonCard);
   return wrap;
 }
 
 // ---- Интеграция с Yonote ----
 async function yonoteCard() {
-  let cfg = { base_url: "", collection_id: "", has_token: false };
-  try { cfg = await api.yonoteConfig(); } catch { /* нет прав/недоступно */ }
+  let cfg = { base_url: "", collection_id: "", has_token: false, is_admin: auth.isAdmin };
+  try { cfg = await api.yonoteConfig(); } catch { /* недоступно */ }
+  const isAdmin = cfg.is_admin ?? auth.isAdmin;
 
-  const baseInput = h("input", { value: cfg.base_url || "", placeholder: "https://cyberbits.yonote.ru" });
+  // Адрес пространства — общий для всех, меняет только администратор.
+  const baseInput = h("input", { value: cfg.base_url || "", placeholder: "https://cyberbits.yonote.ru",
+    disabled: !isAdmin });
+  // API-токен — персональный: каждый пользователь указывает свой.
   const tokenInput = h("input", { type: "password",
-    placeholder: cfg.has_token ? "токен сохранён — оставьте пустым, чтобы не менять" : "вставьте API-токен" });
+    placeholder: cfg.has_token ? "токен сохранён — оставьте пустым, чтобы не менять" : "вставьте свой API-токен" });
+  const status = h("span", { class: "muted", style: { marginLeft: "8px" } });
+
+  // Коллекция по умолчанию — только для администратора.
   const colSel = h("select", {});
   const setCollections = (cols, selected) => {
     colSel.replaceChildren(h("option", { value: "" }, "— выберите коллекцию —"),
       ...cols.map(c => h("option", { value: c.id, selected: c.id === selected }, c.name)));
   };
   setCollections(cfg.collection_id ? [{ id: cfg.collection_id, name: "Сохранённая коллекция (" + cfg.collection_id + ")" }] : [], cfg.collection_id);
-  const status = h("span", { class: "muted", style: { marginLeft: "8px" } });
 
   const saveConfig = async (extra = {}) => {
-    const body = { base_url: baseInput.value.trim(), collection_id: colSel.value, ...extra };
+    const body = { ...extra };
     if (tokenInput.value.trim()) body.token = tokenInput.value.trim();
+    if (isAdmin) { body.base_url = baseInput.value.trim(); body.collection_id = colSel.value; }
     const r = await api.yonoteSaveConfig(body);
     cfg = r; tokenInput.value = "";
-    tokenInput.placeholder = r.has_token ? "токен сохранён — оставьте пустым, чтобы не менять" : "вставьте API-токен";
+    tokenInput.placeholder = r.has_token ? "токен сохранён — оставьте пустым, чтобы не менять" : "вставьте свой API-токен";
     return r;
   };
 
@@ -112,25 +119,35 @@ async function yonoteCard() {
     } catch (e) { status.textContent = e.message; status.style.color = "var(--crit)"; }
   };
 
-  return h("div", { class: "card pad", style: { marginBottom: "16px" } },
+  const hint = isAdmin
+    ? "Импорт из базы знаний Yonote (yonote.ru). Адрес пространства и коллекция по умолчанию — общие для всех. API-токен у каждого пользователя свой: создайте его в Yonote (Настройки → API-токены) и вставьте здесь. Картинки из блоков Proof of Concept и «Результаты эксплуатации» переносятся в карточку уязвимости."
+    : "Укажите свой персональный API-токен Yonote (в Yonote: Настройки → API-токены). Адрес пространства задаёт администратор. Импорт идёт под вашим токеном — вы видите те коллекции и документы, к которым у вас есть доступ в Yonote.";
+
+  const children = [
     h("h3", { style: { marginTop: 0 } }, "Интеграция с Yonote"),
-    h("p", { class: "muted" }, "Импорт проектов из базы знаний Yonote (yonote.ru). Укажите адрес вашего пространства и персональный API-токен (Настройки → API-токены в Yonote). Формат ведения проекта в Yonote описан в документации интеграции."),
-    field("Адрес Yonote", baseInput),
-    field("API-токен", tokenInput),
-    field("Коллекция с проектами", h("div", { class: "row", style: { gap: "8px" } }, colSel,
-      h("button", { class: "btn sec sm", onclick: loadCollections }, "Загрузить коллекции"))),
-    h("div", { class: "row", style: { gap: "8px", marginTop: "8px", alignItems: "center" } },
-      h("button", { class: "btn", onclick: async () => {
-        try { await saveConfig(); toast("Сохранено"); } catch (e) { toast(e.message, true); }
-      } }, "Сохранить"),
-      h("button", { class: "btn sec", onclick: async () => {
-        try {
-          await saveConfig();
-          const r = await api.yonoteTest();
-          status.textContent = `Подключено: ${r.user || ""}${r.team ? " · " + r.team : ""}`;
-          status.style.color = "var(--ok, green)";
-          toast("Подключение работает");
-        } catch (e) { status.textContent = e.message; status.style.color = "var(--crit)"; toast(e.message, true); }
-      } }, "Проверить подключение"),
-      status));
+    h("p", { class: "muted" }, hint),
+    field("Адрес Yonote" + (isAdmin ? "" : " (задаёт администратор)"), baseInput),
+    field("Ваш API-токен", tokenInput),
+  ];
+  if (isAdmin) {
+    children.push(field("Коллекция с проектами (по умолчанию)",
+      h("div", { class: "row", style: { gap: "8px" } }, colSel,
+        h("button", { class: "btn sec sm", onclick: loadCollections }, "Загрузить коллекции"))));
+  }
+  children.push(h("div", { class: "row", style: { gap: "8px", marginTop: "8px", alignItems: "center" } },
+    h("button", { class: "btn", onclick: async () => {
+      try { await saveConfig(); toast("Сохранено"); } catch (e) { toast(e.message, true); }
+    } }, "Сохранить"),
+    h("button", { class: "btn sec", onclick: async () => {
+      try {
+        await saveConfig();
+        const r = await api.yonoteTest();
+        status.textContent = `Подключено: ${r.user || ""}${r.team ? " · " + r.team : ""}`;
+        status.style.color = "var(--ok, green)";
+        toast("Подключение работает");
+      } catch (e) { status.textContent = e.message; status.style.color = "var(--crit)"; toast(e.message, true); }
+    } }, "Проверить подключение"),
+    status));
+
+  return h("div", { class: "card pad", style: { marginBottom: "16px" } }, ...children);
 }
