@@ -191,3 +191,117 @@ def parse_project(title: str, text: str) -> dict:
                 elif key in _PROJECT_FIELDS:
                     project[_PROJECT_FIELDS[key]] = val
     return {"project": project, "vulns": vulns}
+
+
+# ==========================================================================
+# Отдельный документ-уязвимость (один документ Yonote = одна уязвимость)
+# ==========================================================================
+# Шаблон: заголовок документа = название уязвимости, в начале — таблица полей
+# (две колонки «поле | значение»), ниже — текстовые блоки PoC/результатов/
+# рекомендаций (заголовками ## или метками **…**). См. docs/yonote-integration.md.
+
+# регулярка вектора CVSS v3.1 (префикс «CVSS:3.1/» необязателен)
+_CVSS_RE = re.compile(
+    r"(?:CVSS:3\.[01]/)?AV:[NALP]/AC:[LH]/PR:[NLH]/UI:[NR]/S:[UC]/C:[NLH]/I:[NLH]/A:[NLH]",
+    re.IGNORECASE)
+
+# поля таблицы уязвимости: метка → поле модели
+_VULN_TABLE_FIELDS = {
+    "вид работ": "work_type", "тип работ": "work_type", "вид": "work_type",
+    "описание": "description",
+    "границы": "scope", "scope": "scope", "объект": "scope",
+    "инструменты": "tools", "инструментарий": "tools",
+    "обнаружена": "detected_at", "обнаружено": "detected_at",
+    "время обнаружения": "detected_at", "дата обнаружения": "detected_at", "дата": "detected_at",
+    "модели нарушителя": "intruder_models", "нарушители": "intruder_models", "нарушитель": "intruder_models",
+    "owasp": "owasp", "owasp top 10": "owasp", "wstg": "wstg", "owasp wstg": "wstg",
+    "рекомендации": "recommendations",
+    "результаты эксплуатации": "exploitation_result", "результат эксплуатации": "exploitation_result",
+    "poc": "poc", "proof of concept": "poc",
+}
+
+# строки, которые игнорируем как справочные (приложение считает само)
+_VULN_SKIP_KEYS = {"cvssv3.1", "cvss v3.1", "cvss", "вектор cvss", "вектор", "опасность",
+                   "критичность", "уровень", "оценка"}
+
+
+def _strip_emoji(s: str) -> str:
+    """Убирает ведущие значки/эмодзи и пробелы из заголовка."""
+    return re.sub(r"^[\s\W_]*?(?=[\wА-Яа-яЁё])", "", s or "").strip() or (s or "").strip()
+
+
+def _is_sep_row(cells: list[str]) -> bool:
+    return all(re.fullmatch(r":?-{2,}:?", c.strip() or "-") or not c.strip() for c in cells) and \
+        any(set(c.strip()) <= set(":-") and c.strip() for c in cells)
+
+
+def _first_table(lines: list[str]):
+    """Возвращает (строки_таблицы, индекс_после_таблицы). Таблица — первый
+    непрерывный блок строк, начинающихся с «|»."""
+    rows, start = [], None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("|"):
+            if start is None:
+                start = i
+            rows.append(line)
+        elif start is not None:
+            return rows, i
+    return rows, (len(lines) if start is not None else 0)
+
+
+def _row_cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def parse_vuln(title: str, text: str) -> dict:
+    """Разбирает документ-уязвимость Yonote в поля модели Vulnerability.
+    work_type может оказаться пустым — тогда подставляется при импорте."""
+    v = {"title": _strip_emoji(title) or "Уязвимость", "work_type": ""}
+    lines = (text or "").splitlines()
+    table, after = _first_table(lines)
+
+    for row in table:
+        cells = _row_cells(row)
+        if len(cells) < 2 or _is_sep_row(cells):
+            # строка без метки, но со значением-вектором — это вектор CVSS
+            if cells and _CVSS_RE.search(" ".join(cells)):
+                v["cvss_vector"] = _CVSS_RE.search(" ".join(cells)).group(0)
+            continue
+        key = cells[0].lower().strip(" *_:")
+        val = cells[1].strip()
+        # значение-вектор перекрывает любую метку (в т.ч. пустую или «CVSSv3.1»)
+        mvec = _CVSS_RE.search(val)
+        if mvec:
+            v["cvss_vector"] = mvec.group(0)
+            continue
+        if key in _VULN_SKIP_KEYS:
+            continue
+        field = _VULN_TABLE_FIELDS.get(key)
+        if field == "work_type":
+            v["work_type"] = _norm_wt(val) or ""
+        elif field:
+            v[field] = val
+
+    # тело после таблицы: блоки PoC/результатов/рекомендаций
+    rest = "\n".join(lines[after:]).strip()
+    if rest:
+        # по «жирным» меткам **Метка:** …
+        blocks = re.split(r"(?m)^\s*\*\*(.+?)\*\*\s*[:：]?\s*", rest)
+        matched = False
+        for j in range(1, len(blocks) - 1, 2):
+            label = blocks[j].strip().lower().rstrip(":：")
+            field = _VULN_BLOCKS.get(label)
+            if field and not v.get(field):
+                v[field] = blocks[j + 1].strip(); matched = True
+        # по заголовкам ## Метка (секция — до следующего заголовка или **метки**)
+        for m in re.finditer(r"(?m)^#{1,3}\s+(.+?)\s*$", rest):
+            label = m.group(1).strip().lower()
+            field = _VULN_BLOCKS.get(label)
+            if field and not v.get(field):
+                nxt = re.search(r"(?m)^(?:#{1,3}\s+|\s*\*\*.+?\*\*)", rest[m.end():])
+                v[field] = rest[m.end(): m.end() + (nxt.start() if nxt else len(rest))].strip()
+                matched = True
+        # если ни меток, ни заголовков — весь текст считаем PoC
+        if not matched and not v.get("poc"):
+            v["poc"] = rest
+    return v

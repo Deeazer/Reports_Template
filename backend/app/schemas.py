@@ -148,6 +148,11 @@ class YonoteImport(BaseModel):
     document_ids: list[str] = []
 
 
+class YonoteVulnImport(BaseModel):
+    document_ids: list[str] = []
+    work_type: Optional[str] = None     # вид работ, в который импортировать (иначе — из документа)
+
+
 class VulnUpdate(BaseModel):
     work_type: Optional[str] = None
     title: Optional[str] = None

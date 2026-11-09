@@ -100,6 +100,16 @@ class YonoteClient:
             offset += len(batch)
         return out
 
+    def tree(self, collection_id: str) -> list[dict]:
+        """Дерево документов коллекции: [{id, title, children:[...]}].
+        Используется для навигации к документам-уязвимостям."""
+        data = self._post("collections.documents", {"id": collection_id}).get("data", []) or []
+
+        def norm(node):
+            return {"id": node.get("id"), "title": node.get("title", ""),
+                    "children": [norm(c) for c in (node.get("children") or [])]}
+        return [norm(n) for n in data]
+
     def document(self, document_id: str) -> dict:
         """Документ с полным текстом (Markdown) по id."""
         d = self._post("documents.info", {"id": document_id}).get("data", {})

@@ -19,7 +19,7 @@ from .security import (current_user, require_admin, can_access_project,
 from .config import ADMIN_LOGIN, ADMIN_PASSWORD, UPLOAD_DIR
 from .report import build_report
 from .integrations.yonote import YonoteClient, YonoteError
-from .integrations.yonote_import import parse_project
+from .integrations.yonote_import import parse_project, parse_vuln
 
 app = FastAPI(title="Генератор отчётов по пентесту", version="1.0")
 
@@ -282,6 +282,19 @@ def yonote_documents(collection_id: str = "", db: Session = Depends(get_db),
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/integrations/yonote/tree")
+def yonote_tree(collection_id: str = "", db: Session = Depends(get_db),
+                _: models.User = Depends(require_admin)):
+    """Дерево документов коллекции — для навигации к документам-уязвимостям."""
+    cid = collection_id or _yonote_cfg(db).get("collection_id") or ""
+    if not cid:
+        raise HTTPException(400, "Не выбрана коллекция Yonote")
+    try:
+        return {"tree": _yonote_client(db).tree(cid)}
+    except YonoteError as e:
+        raise HTTPException(400, str(e))
+
+
 def _import_yonote_doc(db, user, parsed: dict) -> models.Project:
     """Создаёт проект и уязвимости из разобранного документа Yonote."""
     s = get_all_settings(db)
@@ -344,6 +357,52 @@ def yonote_import(data: schemas.YonoteImport, db: Session = Depends(get_db),
             db.rollback()
             results.append({"document_id": did, "ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001 — не валим весь импорт из-за одного документа
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": f"Ошибка разбора: {e}"})
+    return {"results": results, "imported": sum(1 for r in results if r.get("ok"))}
+
+
+_VULN_IMPORT_FIELDS = {"title", "description", "scope", "tools", "detected_at", "cvss_vector",
+                       "intruder_models", "poc", "exploitation_result", "recommendations", "owasp", "wstg"}
+
+
+@app.post("/api/projects/{pid}/vulns/import-yonote")
+def yonote_import_vulns(pid: int, data: schemas.YonoteVulnImport, db: Session = Depends(get_db),
+                        user: models.User = Depends(current_user)):
+    """Импорт документов-уязвимостей Yonote как уязвимостей проекта.
+    Один документ = одна готовая уязвимость (см. docs/yonote-integration.md)."""
+    p = _load_project(db, pid, user)
+    if not data.document_ids:
+        raise HTTPException(400, "Не выбрано ни одного документа")
+    work_types = p.work_types or []
+    if not work_types:
+        raise HTTPException(400, "У проекта нет видов работ — импортировать уязвимости некуда")
+    forced = data.work_type if data.work_type in work_types else None
+    default_wt = forced or work_types[0]
+    client = _yonote_client(db)
+    # текущие счётчики порядка по видам работ
+    base = {wt: db.query(models.Vulnerability).filter_by(project_id=pid, work_type=wt).count()
+            for wt in work_types}
+    results = []
+    for did in data.document_ids:
+        try:
+            doc = client.document(did)
+            vd = parse_vuln(doc["title"], doc["text"])
+            wt = forced or (vd.get("work_type") if vd.get("work_type") in work_types else None) or default_wt
+            n = base.get(wt, 0); base[wt] = n + 1
+            fields = {k: val for k, val in vd.items() if k in _VULN_IMPORT_FIELDS and k != "work_type"}
+            v = models.Vulnerability(project_id=pid, work_type=wt, order_index=n,
+                                     created_by=user.id, updated_by=user.id, **fields)
+            db.add(v); db.flush()
+            audit.log(db, user, pid, "vuln", v.id, "create", v.title)
+            _touch(p, user)
+            db.commit()
+            results.append({"document_id": did, "ok": True, "vuln_id": v.id,
+                            "title": v.title, "work_type": wt})
+        except YonoteError as e:
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
             db.rollback()
             results.append({"document_id": did, "ok": False, "error": f"Ошибка разбора: {e}"})
     return {"results": results, "imported": sum(1 for r in results if r.get("ok"))}

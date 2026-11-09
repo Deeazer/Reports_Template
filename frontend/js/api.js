@@ -48,7 +48,9 @@ export const api = {
   yonoteTest: () => req("POST", "/integrations/yonote/test"),
   yonoteCollections: () => req("GET", "/integrations/yonote/collections"),
   yonoteDocuments: (cid) => req("GET", "/integrations/yonote/documents" + (cid ? "?collection_id=" + encodeURIComponent(cid) : "")),
+  yonoteTree: (cid) => req("GET", "/integrations/yonote/tree" + (cid ? "?collection_id=" + encodeURIComponent(cid) : "")),
   yonoteImport: (ids) => req("POST", "/integrations/yonote/import", { document_ids: ids }),
+  yonoteImportVulns: (pid, ids, work_type) => req("POST", `/projects/${pid}/vulns/import-yonote`, { document_ids: ids, work_type }),
 
   users: () => req("GET", "/users"),
   createUser: (d) => req("POST", "/users", d),
