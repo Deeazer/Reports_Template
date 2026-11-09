@@ -392,6 +392,94 @@ function toolsTab(p, save) {
 const RISK_RANK = { "Высокий": 0, "Средний": 1, "Низкий": 2, "Информативный": 3 };
 const SEV_RANK = { "Критическая": 0, "Высокая": 1, "Средняя": 2, "Низкая": 3, "Информативная": 4 };
 
+// Импорт уязвимостей из Yonote: обзор дерева документов, выбор документов-уязвимостей
+async function openVulnImport(p, wt, reload) {
+  const bg = h("div", { class: "modal-bg" });
+  const close = () => bg.remove();
+  const treeBox = h("div", { style: { maxHeight: "360px", overflow: "auto", border: "1px solid var(--line2)", borderRadius: "8px", padding: "6px 10px" } });
+  const result = h("div", { style: { marginTop: "8px" } });
+  const chosen = new Set();
+  const importBtn = h("button", { class: "btn", onclick: doImport }, "Импортировать в «" + state.ref.work_types[wt].title + "»");
+
+  const body = h("div", {}, h("div", { class: "muted" }, "Загрузка…"));
+  const colSel = h("select", { onchange: loadTree });
+
+  async function loadTree() {
+    chosen.clear();
+    treeBox.replaceChildren(h("div", { class: "muted" }, "Загрузка дерева документов…"));
+    result.replaceChildren();
+    try {
+      const { tree } = await api.yonoteTree(colSel.value);
+      treeBox.replaceChildren();
+      if (!tree.length) treeBox.append(h("div", { class: "muted" }, "Коллекция пуста."));
+      tree.forEach(node => treeBox.append(renderNode(node, 0)));
+    } catch (e) { treeBox.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); }
+  }
+
+  let cfg = null;
+  try { cfg = await api.yonoteConfig(); } catch { /* нет прав */ }
+  if (!cfg || !cfg.has_token || !cfg.base_url) {
+    body.replaceChildren(h("p", {}, "Интеграция с Yonote не настроена. Откройте «Настройки» → «Интеграция с Yonote»."));
+    importBtn.style.display = "none";
+  } else {
+    try {
+      const { collections } = await api.yonoteCollections();
+      colSel.replaceChildren(...collections.map(c => h("option", { value: c.id, selected: c.id === cfg.collection_id }, c.name)));
+      body.replaceChildren(
+        field("Коллекция", colSel),
+        h("p", { class: "muted", style: { marginTop: 0 } }, "Отметьте документы-уязвимости (один документ = одна уязвимость). Папки можно раскрывать."),
+        treeBox, result);
+      await loadTree();
+    } catch (e) { body.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); importBtn.style.display = "none"; }
+  }
+
+  function renderNode(node, depth) {
+    const wrap = h("div", {});
+    const row = h("div", { class: "row", style: { padding: "2px 0", paddingLeft: (depth * 16) + "px", alignItems: "center", gap: "6px" } });
+    const kids = node.children || [];
+    const childBox = h("div", { style: { display: "none" } });
+    if (kids.length) {
+      const tgl = h("span", { style: { cursor: "pointer", width: "14px", display: "inline-block", userSelect: "none" } }, "▸");
+      tgl.addEventListener("click", () => {
+        const open = childBox.style.display === "none";
+        childBox.style.display = open ? "block" : "none"; tgl.textContent = open ? "▾" : "▸";
+      });
+      row.append(tgl);
+    } else {
+      row.append(h("span", { style: { width: "14px", display: "inline-block" } }, ""));
+    }
+    const cb = h("input", { type: "checkbox", style: { width: "auto" },
+      onchange: e => { e.target.checked ? chosen.add(node.id) : chosen.delete(node.id); } });
+    row.append(cb, h("span", {}, node.title || "(без названия)"));
+    wrap.append(row);
+    if (kids.length) { kids.forEach(c => childBox.append(renderNode(c, depth + 1))); wrap.append(childBox); }
+    return wrap;
+  }
+
+  async function doImport() {
+    if (!chosen.size) { toast("Отметьте хотя бы один документ", true); return; }
+    importBtn.disabled = true; importBtn.textContent = "Импорт…";
+    try {
+      const r = await api.yonoteImportVulns(p.id, [...chosen], wt);
+      const ok = r.results.filter(x => x.ok), bad = r.results.filter(x => !x.ok);
+      result.replaceChildren(
+        h("div", {}, `Импортировано уязвимостей: ${r.imported}`),
+        ...ok.map(x => h("div", { class: "muted", style: { fontSize: "12px" } }, `✓ ${x.title}`)),
+        ...bad.map(x => h("div", { style: { color: "var(--crit)", fontSize: "12px" } }, `✗ ${x.document_id}: ${x.error}`)));
+      if (r.imported) { toast(`Импортировано: ${r.imported}`); setTimeout(() => { close(); reload && reload(); }, 1200); }
+    } catch (e) { toast(e.message, true); }
+    importBtn.disabled = false; importBtn.textContent = "Импортировать в «" + state.ref.work_types[wt].title + "»";
+  }
+
+  bg.append(h("div", { class: "modal", style: { maxWidth: "640px" } },
+    h("h3", { style: { marginTop: 0 } }, "Импорт уязвимостей из Yonote"),
+    body,
+    h("div", { class: "row", style: { justifyContent: "flex-end", marginTop: "10px", gap: "8px" } },
+      h("button", { class: "btn sec", onclick: close }, "Закрыть"), importBtn)));
+  bg.addEventListener("click", e => { if (e.target === bg) close(); });
+  document.body.append(bg);
+}
+
 function vulnsTab(p, wt, onChanged) {
   const box = h("div", {});
   const list = h("div", {});
@@ -459,10 +547,12 @@ function vulnsTab(p, wt, onChanged) {
   box.append(h("div", { class: "between", style: { marginBottom: "6px" } },
     h("div", {}, h("b", {}, state.ref.work_types[wt].title),
       h("span", { class: "muted" }, "  —  каждая уязвимость попадает в сводные таблицы автоматически")),
-    h("button", { class: "btn", onclick: async () => {
-      try { const v = await api.addVuln(p.id, { work_type: wt, title: "Новая уязвимость" }); v._open = true; p.vulns.push(v); draw(); }
-      catch (e) { toast(e.message, true); }
-    } }, "+ Добавить уязвимость")),
+    h("div", { class: "row", style: { gap: "8px" } },
+      auth.isAdmin && h("button", { class: "btn sec", onclick: () => openVulnImport(p, wt, reload) }, "Импорт из Yonote"),
+      h("button", { class: "btn", onclick: async () => {
+        try { const v = await api.addVuln(p.id, { work_type: wt, title: "Новая уязвимость" }); v._open = true; p.vulns.push(v); draw(); }
+        catch (e) { toast(e.message, true); }
+      } }, "+ Добавить уязвимость"))),
     sortCtl, list);
   draw();
   return box;

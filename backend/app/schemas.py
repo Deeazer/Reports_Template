@@ -137,6 +137,22 @@ class VulnReorder(BaseModel):
     order: list[int]            # id уязвимостей в нужном порядке
 
 
+# ---------- интеграция Yonote ----------
+class YonoteConfig(BaseModel):
+    base_url: Optional[str] = None
+    token: Optional[str] = None        # пустая строка/None — не менять существующий
+    collection_id: Optional[str] = None
+
+
+class YonoteImport(BaseModel):
+    document_ids: list[str] = []
+
+
+class YonoteVulnImport(BaseModel):
+    document_ids: list[str] = []
+    work_type: Optional[str] = None     # вид работ, в который импортировать (иначе — из документа)
+
+
 class VulnUpdate(BaseModel):
     work_type: Optional[str] = None
     title: Optional[str] = None

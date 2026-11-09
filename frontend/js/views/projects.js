@@ -10,7 +10,10 @@ export async function renderProjects() {
   const wrap = h("div", {});
   wrap.append(h("div", { class: "between", style: { marginBottom: "18px" } },
     h("h2", { style: { margin: 0 } }, "Проекты"),
-    h("button", { class: "btn", onclick: () => openCreate(wrap) }, "+ Новый проект"),
+    h("div", { class: "row", style: { gap: "8px" } },
+      auth.isAdmin && h("button", { class: "btn sec", onclick: openImport }, "Импорт из Yonote"),
+      h("button", { class: "btn", onclick: () => openCreate(wrap) }, "+ Новый проект"),
+    ),
   ));
 
   if (!projects.length) {
@@ -45,6 +48,71 @@ export async function renderProjects() {
   }
   wrap.append(grid);
   return wrap;
+}
+
+async function openImport() {
+  const bg = h("div", { class: "modal-bg" });
+  const close = () => bg.remove();
+  const body = h("div", {}, h("div", { class: "muted" }, "Загрузка…"));
+  const colSel = h("select", {});
+  const docBox = h("div", { style: { maxHeight: "340px", overflow: "auto", marginTop: "8px" } });
+  const result = h("div", { style: { marginTop: "8px" } });
+  const importBtn = h("button", { class: "btn", onclick: doImport }, "Импортировать выбранные");
+
+  let cfg = null;
+  try { cfg = await api.yonoteConfig(); } catch { /* нет прав */ }
+  if (!cfg || !cfg.has_token || !cfg.base_url) {
+    body.replaceChildren(h("p", {}, "Интеграция с Yonote не настроена. Откройте «Настройки» → «Интеграция с Yonote», укажите адрес и API-токен."));
+    importBtn.style.display = "none";
+  } else {
+    body.replaceChildren(
+      field("Коллекция", h("div", { class: "row", style: { gap: "8px" } }, colSel,
+        h("button", { class: "btn sec sm", onclick: loadDocs }, "Обновить список"))),
+      docBox, result);
+    try {
+      const { collections } = await api.yonoteCollections();
+      colSel.replaceChildren(...collections.map(c => h("option", { value: c.id, selected: c.id === cfg.collection_id }, c.name)));
+      colSel.addEventListener("change", loadDocs);
+      await loadDocs();
+    } catch (e) { docBox.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); }
+  }
+
+  async function loadDocs() {
+    docBox.replaceChildren(h("div", { class: "muted" }, "Загрузка документов…"));
+    result.replaceChildren();
+    try {
+      const { documents } = await api.yonoteDocuments(colSel.value);
+      if (!documents.length) { docBox.replaceChildren(h("div", { class: "muted" }, "В коллекции нет документов верхнего уровня.")); return; }
+      docBox.replaceChildren(...documents.map(d =>
+        h("label", { class: "row", style: { padding: "4px 0", cursor: "pointer" } },
+          h("input", { type: "checkbox", value: d.id, style: { width: "auto", marginRight: "8px" } }),
+          h("span", {}, d.title || "(без названия)"))));
+    } catch (e) { docBox.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); }
+  }
+
+  async function doImport() {
+    const ids = [...docBox.querySelectorAll("input:checked")].map(c => c.value);
+    if (!ids.length) { toast("Выберите хотя бы один документ", true); return; }
+    importBtn.disabled = true; importBtn.textContent = "Импорт…";
+    try {
+      const r = await api.yonoteImport(ids);
+      const ok = r.results.filter(x => x.ok), bad = r.results.filter(x => !x.ok);
+      result.replaceChildren(
+        h("div", {}, `Импортировано проектов: ${r.imported}`),
+        ...ok.map(x => h("div", { class: "muted", style: { fontSize: "12px" } }, `✓ ${x.name} (уязвимостей: ${x.vulns})`)),
+        ...bad.map(x => h("div", { style: { color: "var(--crit)", fontSize: "12px" } }, `✗ ${x.document_id}: ${x.error}`)));
+      if (r.imported) { toast(`Импортировано: ${r.imported}`); setTimeout(() => { close(); navigate({ name: "projects" }); }, 1200); }
+    } catch (e) { toast(e.message, true); }
+    importBtn.disabled = false; importBtn.textContent = "Импортировать выбранные";
+  }
+
+  bg.append(h("div", { class: "modal" },
+    h("h3", { style: { marginTop: 0 } }, "Импорт проектов из Yonote"),
+    body,
+    h("div", { class: "row", style: { justifyContent: "flex-end", marginTop: "10px", gap: "8px" } },
+      h("button", { class: "btn sec", onclick: close }, "Закрыть"), importBtn)));
+  bg.addEventListener("click", e => { if (e.target === bg) close(); });
+  document.body.append(bg);
 }
 
 function openCreate(wrap) {

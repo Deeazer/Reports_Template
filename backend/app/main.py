@@ -18,6 +18,8 @@ from .security import (current_user, require_admin, can_access_project,
                        hash_password, verify_password, create_token)
 from .config import ADMIN_LOGIN, ADMIN_PASSWORD, UPLOAD_DIR
 from .report import build_report
+from .integrations.yonote import YonoteClient, YonoteError
+from .integrations.yonote_import import parse_project, parse_vuln
 
 app = FastAPI(title="Генератор отчётов по пентесту", version="1.0")
 
@@ -165,7 +167,8 @@ def delete_user(uid: int, db: Session = Depends(get_db),
 @app.get("/api/settings")
 def read_settings(db: Session = Depends(get_db), _: models.User = Depends(current_user)):
     data = get_all_settings(db)
-    data.pop("bdu", None)   # перечень БДУ отдаётся отдельно (/api/bdu)
+    data.pop("bdu", None)      # перечень БДУ отдаётся отдельно (/api/bdu)
+    data.pop("yonote", None)   # настройки интеграции — только админу, через свой эндпоинт
     return data
 
 
@@ -210,6 +213,199 @@ def import_bdu(file: UploadFile = File(...), db: Session = Depends(get_db),
             changed += 1
     db.commit()
     return {"ok": True, "threats": len(bdu["threats"]), "retrieved": bdu["retrieved"], "projects_updated": changed}
+
+
+# --------------------------------------------------------------------------
+# Интеграция с Yonote (yonote.ru)
+# --------------------------------------------------------------------------
+def _yonote_cfg(db) -> dict:
+    from .crud_settings import get_setting
+    return get_setting(db, "yonote") or {}
+
+
+def _yonote_client(db) -> YonoteClient:
+    cfg = _yonote_cfg(db)
+    if not cfg.get("base_url") or not cfg.get("token"):
+        raise HTTPException(400, "Интеграция с Yonote не настроена: укажите адрес и API-токен")
+    return YonoteClient(cfg["base_url"], cfg["token"])
+
+
+@app.get("/api/integrations/yonote/config")
+def yonote_get_config(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    """Настройки интеграции. Токен не возвращается — только признак его наличия."""
+    cfg = _yonote_cfg(db)
+    return {"base_url": cfg.get("base_url", ""), "collection_id": cfg.get("collection_id", ""),
+            "has_token": bool(cfg.get("token"))}
+
+
+@app.put("/api/integrations/yonote/config")
+def yonote_set_config(data: schemas.YonoteConfig, db: Session = Depends(get_db),
+                      _: models.User = Depends(require_admin)):
+    cfg = dict(_yonote_cfg(db))
+    if data.base_url is not None:
+        cfg["base_url"] = data.base_url.strip()
+    if data.collection_id is not None:
+        cfg["collection_id"] = data.collection_id.strip()
+    # токен обновляем только если прислан непустой (пустой — оставить прежний)
+    if data.token:
+        cfg["token"] = data.token.strip()
+    set_setting(db, "yonote", cfg)
+    return {"base_url": cfg.get("base_url", ""), "collection_id": cfg.get("collection_id", ""),
+            "has_token": bool(cfg.get("token"))}
+
+
+@app.post("/api/integrations/yonote/test")
+def yonote_test(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    try:
+        return {"ok": True, **_yonote_client(db).auth_info()}
+    except YonoteError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/integrations/yonote/collections")
+def yonote_collections(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    try:
+        return {"collections": _yonote_client(db).collections()}
+    except YonoteError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/integrations/yonote/documents")
+def yonote_documents(collection_id: str = "", db: Session = Depends(get_db),
+                     _: models.User = Depends(require_admin)):
+    cid = collection_id or _yonote_cfg(db).get("collection_id") or ""
+    if not cid:
+        raise HTTPException(400, "Не выбрана коллекция Yonote")
+    try:
+        return {"documents": _yonote_client(db).documents(cid)}
+    except YonoteError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/integrations/yonote/tree")
+def yonote_tree(collection_id: str = "", db: Session = Depends(get_db),
+                _: models.User = Depends(require_admin)):
+    """Дерево документов коллекции — для навигации к документам-уязвимостям."""
+    cid = collection_id or _yonote_cfg(db).get("collection_id") or ""
+    if not cid:
+        raise HTTPException(400, "Не выбрана коллекция Yonote")
+    try:
+        return {"tree": _yonote_client(db).tree(cid)}
+    except YonoteError as e:
+        raise HTTPException(400, str(e))
+
+
+def _import_yonote_doc(db, user, parsed: dict) -> models.Project:
+    """Создаёт проект и уязвимости из разобранного документа Yonote."""
+    s = get_all_settings(db)
+    pj = parsed["project"]
+    work_types = refdata.enabled_work_types(pj.get("work_types") or [])
+    p = models.Project(
+        name=pj.get("name") or "Импортированный проект",
+        client_name=pj.get("client_name", ""),
+        client_requisites=pj.get("client_requisites", ""),
+        object_description=pj.get("object_description", ""),
+        work_types=work_types,
+        period_from=pj.get("period_from", ""),
+        period_to=pj.get("period_to", ""),
+        tech_sites=pj.get("tech_sites") or refdata.DEFAULT_TECH_SITES,
+        created_by=user.id, updated_by=user.id,
+        intruders=s.get("intruders", refdata.DEFAULT_INTRUDERS),
+        interfaces=s.get("interfaces", refdata.DEFAULT_INTERFACES),
+        threats=refdata.complete_threats(s.get("threats", refdata.DEFAULT_THREATS), _bdu(db)),
+        tools=s.get("tools", refdata.DEFAULT_TOOLS),
+        executors=[],
+    )
+    db.add(p); db.flush()
+    # уязвимости: вид работ по умолчанию — первый доступный в проекте
+    default_wt = work_types[0] if work_types else ""
+    counters = {}
+    vuln_fields = {"title", "description", "scope", "tools", "detected_at", "cvss_vector",
+                   "intruder_models", "poc", "exploitation_result", "recommendations", "owasp", "wstg"}
+    for vd in parsed["vulns"]:
+        wt = vd.get("work_type") or default_wt
+        if wt not in work_types:
+            wt = default_wt
+        if not wt:
+            continue
+        n = counters.get(wt, 0)
+        counters[wt] = n + 1
+        fields = {k: v for k, v in vd.items() if k in vuln_fields and k != "work_type"}
+        db.add(models.Vulnerability(project_id=p.id, work_type=wt, order_index=n,
+                                    created_by=user.id, updated_by=user.id, **fields))
+    audit.log(db, user, p.id, "project", p.id, "create", p.name)
+    return p
+
+
+@app.post("/api/integrations/yonote/import")
+def yonote_import(data: schemas.YonoteImport, db: Session = Depends(get_db),
+                  user: models.User = Depends(current_user)):
+    """Импорт выбранных документов Yonote как проектов приложения (с уязвимостями)."""
+    if not data.document_ids:
+        raise HTTPException(400, "Не выбрано ни одного документа")
+    client = _yonote_client(db)
+    results = []
+    for did in data.document_ids:
+        try:
+            doc = client.document(did)
+            parsed = parse_project(doc["title"], doc["text"])
+            p = _import_yonote_doc(db, user, parsed)
+            db.commit()   # каждый документ — отдельной транзакцией
+            results.append({"document_id": did, "ok": True, "project_id": p.id,
+                            "name": p.name, "vulns": len(parsed["vulns"])})
+        except YonoteError as e:
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001 — не валим весь импорт из-за одного документа
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": f"Ошибка разбора: {e}"})
+    return {"results": results, "imported": sum(1 for r in results if r.get("ok"))}
+
+
+_VULN_IMPORT_FIELDS = {"title", "description", "scope", "tools", "detected_at", "cvss_vector",
+                       "intruder_models", "poc", "exploitation_result", "recommendations", "owasp", "wstg"}
+
+
+@app.post("/api/projects/{pid}/vulns/import-yonote")
+def yonote_import_vulns(pid: int, data: schemas.YonoteVulnImport, db: Session = Depends(get_db),
+                        user: models.User = Depends(current_user)):
+    """Импорт документов-уязвимостей Yonote как уязвимостей проекта.
+    Один документ = одна готовая уязвимость (см. docs/yonote-integration.md)."""
+    p = _load_project(db, pid, user)
+    if not data.document_ids:
+        raise HTTPException(400, "Не выбрано ни одного документа")
+    work_types = p.work_types or []
+    if not work_types:
+        raise HTTPException(400, "У проекта нет видов работ — импортировать уязвимости некуда")
+    forced = data.work_type if data.work_type in work_types else None
+    default_wt = forced or work_types[0]
+    client = _yonote_client(db)
+    # текущие счётчики порядка по видам работ
+    base = {wt: db.query(models.Vulnerability).filter_by(project_id=pid, work_type=wt).count()
+            for wt in work_types}
+    results = []
+    for did in data.document_ids:
+        try:
+            doc = client.document(did)
+            vd = parse_vuln(doc["title"], doc["text"])
+            wt = forced or (vd.get("work_type") if vd.get("work_type") in work_types else None) or default_wt
+            n = base.get(wt, 0); base[wt] = n + 1
+            fields = {k: val for k, val in vd.items() if k in _VULN_IMPORT_FIELDS and k != "work_type"}
+            v = models.Vulnerability(project_id=pid, work_type=wt, order_index=n,
+                                     created_by=user.id, updated_by=user.id, **fields)
+            db.add(v); db.flush()
+            audit.log(db, user, pid, "vuln", v.id, "create", v.title)
+            _touch(p, user)
+            db.commit()
+            results.append({"document_id": did, "ok": True, "vuln_id": v.id,
+                            "title": v.title, "work_type": wt})
+        except YonoteError as e:
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            results.append({"document_id": did, "ok": False, "error": f"Ошибка разбора: {e}"})
+    return {"results": results, "imported": sum(1 for r in results if r.get("ok"))}
 
 
 @app.get("/api/refdata")
