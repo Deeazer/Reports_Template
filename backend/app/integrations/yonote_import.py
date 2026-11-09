@@ -293,10 +293,26 @@ _BOLD_LABEL_RE = re.compile(r"^[ \t]*\*\*(.+?)\*\*[ \t]*[:：]?[ \t]*$")
 _BOLD_INLINE_RE = re.compile(r"^[ \t]*\*\*(.+?)\*\*[ \t]*[:：]?[ \t]*(\S.*)$")
 
 
+def _block_label(line: str):
+    """Если строка целиком — это метка блока тела, возвращает поле модели.
+
+    Yonote отдаёт через API заголовки блоков (PoC, результаты, рекомендации)
+    по-разному: как ``## Метка``, как ``**Метка**`` или просто ``Метка`` на
+    отдельной строке (без оформления). Распознаём все три варианта."""
+    s = (line or "").strip()
+    if not s:
+        return None
+    s = re.sub(r"^#{1,6}\s+", "", s)                  # снять «## » заголовка
+    s = re.sub(r"^\*\*(.+?)\*\*$", r"\1", s.strip())  # снять «**…**» жирное
+    s = s.strip().rstrip(":：").strip().lower()
+    return _VULN_BLOCKS.get(s)
+
+
 def _body_start(lines: list[str]) -> int:
-    """Индекс первой строки тела — заголовка ## или жирной метки **…**."""
+    """Индекс первой строки тела — заголовка, жирной метки или строки-метки блока."""
     for i, line in enumerate(lines):
-        if _HEADING_RE.match(line) or re.match(r"^[ \t]*\*\*.+?\*\*", line):
+        if _HEADING_RE.match(line) or re.match(r"^[ \t]*\*\*.+?\*\*", line) \
+                or _block_label(line):
             return i
     return len(lines)
 
@@ -333,37 +349,36 @@ def parse_vuln(title: str, text: str) -> dict:
             _apply_field(v, kv[0], kv[1])
 
     # тело: блоки PoC/результатов/рекомендаций.
-    # Разбиваем на сегменты по заголовкам (## Метка) и жирным меткам (**Метка:**),
-    # допуская ведущие пробелы и текст на той же строке, что и метка.
+    # Сегмент начинается со строки-метки блока: ``## Метка``, ``**Метка**`` или
+    # просто ``Метка`` на отдельной строке (Yonote отдаёт их по-разному), а также
+    # с ``**Метка:** текст`` (метка и текст на одной строке).
     rest = "\n".join(body_lines).strip()
     if rest:
         sections: list[tuple[str, list[str]]] = []
-        cur_label: str | None = None
+        cur_field: str | None = None
         cur_buf: list[str] = []
 
         def _flush():
-            if cur_label is not None:
-                sections.append((cur_label, cur_buf))
+            if cur_field is not None:
+                sections.append((cur_field, cur_buf))
 
         for line in body_lines:
-            hm = _HEADING_RE.match(line)
-            bl = _BOLD_LABEL_RE.match(line)
             bi = _BOLD_INLINE_RE.match(line)
-            if hm or bl:
+            inline_field = (_VULN_BLOCKS.get(bi.group(1).strip().rstrip(":：").lower())
+                            if bi else None)
+            field = _block_label(line)
+            if field is not None:
                 _flush()
-                cur_label = (hm or bl).group(1).strip().rstrip(":：").lower()
-                cur_buf = []
-            elif bi:
+                cur_field, cur_buf = field, []
+            elif inline_field:
                 _flush()
-                cur_label = bi.group(1).strip().rstrip(":：").lower()
-                cur_buf = [bi.group(2)]
-            elif cur_label is not None:
+                cur_field, cur_buf = inline_field, [bi.group(2)]
+            elif cur_field is not None:
                 cur_buf.append(line)
         _flush()
 
         matched = False
-        for label, buf in sections:
-            field = _VULN_BLOCKS.get(label)
+        for field, buf in sections:
             if field and not v.get(field):
                 v[field] = "\n".join(buf).strip()
                 matched = True
