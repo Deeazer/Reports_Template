@@ -269,10 +269,34 @@ def _apply_field(v: dict, key: str, val: str):
         v[field] = val
 
 
+def _normalize_md(text: str) -> str:
+    """Приводит markdown Yonote к предсказуемому виду:
+    - снимает хвостовые «\\» (жёсткие переносы Outline);
+    - разэкранирует ведущие решётки заголовков (``\\#\\# X`` → ``## X``);
+    - убирает ведущие пробелы перед заголовком (``  ## X`` → ``## X``).
+    Так заголовки распознаются одинаково и при разбивке тела, и при поиске
+    его начала."""
+    out = []
+    for line in (text or "").splitlines():
+        s = re.sub(r"\\+\s*$", "", line)  # хвостовой hard-break «\»
+        m = re.match(r"^[ \t]*((?:\\?#){1,6})([ \t]+.*)$", s)
+        if m:
+            s = m.group(1).replace("\\", "") + m.group(2)
+        out.append(s)
+    return "\n".join(out)
+
+
+_HEADING_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*$")
+# «жирная» метка в отдельной строке: **Метка:**
+_BOLD_LABEL_RE = re.compile(r"^[ \t]*\*\*(.+?)\*\*[ \t]*[:：]?[ \t]*$")
+# «жирная» метка с текстом на той же строке: **Метка:** текст
+_BOLD_INLINE_RE = re.compile(r"^[ \t]*\*\*(.+?)\*\*[ \t]*[:：]?[ \t]*(\S.*)$")
+
+
 def _body_start(lines: list[str]) -> int:
     """Индекс первой строки тела — заголовка ## или жирной метки **…**."""
     for i, line in enumerate(lines):
-        if re.match(r"^\s*#{1,3}\s+\S", line) or re.match(r"^\s*\*\*.+?\*\*", line):
+        if _HEADING_RE.match(line) or re.match(r"^[ \t]*\*\*.+?\*\*", line):
             return i
     return len(lines)
 
@@ -286,7 +310,7 @@ def parse_vuln(title: str, text: str) -> dict:
     подставляется при импорте.
     """
     v = {"title": _strip_emoji(title) or "Уязвимость", "work_type": ""}
-    lines = (text or "").splitlines()
+    lines = _normalize_md(text).splitlines()
     head_end = _body_start(lines)
     head, body_lines = lines[:head_end], lines[head_end:]
 
@@ -308,26 +332,42 @@ def parse_vuln(title: str, text: str) -> dict:
         if kv:
             _apply_field(v, kv[0], kv[1])
 
-    # тело: блоки PoC/результатов/рекомендаций
+    # тело: блоки PoC/результатов/рекомендаций.
+    # Разбиваем на сегменты по заголовкам (## Метка) и жирным меткам (**Метка:**),
+    # допуская ведущие пробелы и текст на той же строке, что и метка.
     rest = "\n".join(body_lines).strip()
     if rest:
-        # по «жирным» меткам **Метка:** …
-        blocks = re.split(r"(?m)^\s*\*\*(.+?)\*\*\s*[:：]?\s*", rest)
+        sections: list[tuple[str, list[str]]] = []
+        cur_label: str | None = None
+        cur_buf: list[str] = []
+
+        def _flush():
+            if cur_label is not None:
+                sections.append((cur_label, cur_buf))
+
+        for line in body_lines:
+            hm = _HEADING_RE.match(line)
+            bl = _BOLD_LABEL_RE.match(line)
+            bi = _BOLD_INLINE_RE.match(line)
+            if hm or bl:
+                _flush()
+                cur_label = (hm or bl).group(1).strip().rstrip(":：").lower()
+                cur_buf = []
+            elif bi:
+                _flush()
+                cur_label = bi.group(1).strip().rstrip(":：").lower()
+                cur_buf = [bi.group(2)]
+            elif cur_label is not None:
+                cur_buf.append(line)
+        _flush()
+
         matched = False
-        for j in range(1, len(blocks) - 1, 2):
-            label = blocks[j].strip().lower().rstrip(":：")
+        for label, buf in sections:
             field = _VULN_BLOCKS.get(label)
             if field and not v.get(field):
-                v[field] = blocks[j + 1].strip(); matched = True
-        # по заголовкам ## Метка (секция — до следующего заголовка или **метки**)
-        for m in re.finditer(r"(?m)^#{1,3}\s+(.+?)\s*$", rest):
-            label = m.group(1).strip().lower()
-            field = _VULN_BLOCKS.get(label)
-            if field and not v.get(field):
-                nxt = re.search(r"(?m)^(?:#{1,3}\s+|\s*\*\*.+?\*\*)", rest[m.end():])
-                v[field] = rest[m.end(): m.end() + (nxt.start() if nxt else len(rest))].strip()
+                v[field] = "\n".join(buf).strip()
                 matched = True
-        # если ни меток, ни заголовков — весь текст считаем PoC
+        # если ни меток, ни заголовков не распознали — весь текст считаем PoC
         if not matched and not v.get("poc"):
             v["poc"] = rest
     return v
