@@ -102,13 +102,39 @@ class YonoteClient:
 
     def tree(self, collection_id: str) -> list[dict]:
         """Дерево документов коллекции: [{id, title, children:[...]}].
-        Используется для навигации к документам-уязвимостям."""
-        data = self._post("collections.documents", {"id": collection_id}).get("data", []) or []
 
-        def norm(node):
-            return {"id": node.get("id"), "title": node.get("title", ""),
-                    "children": [norm(c) for c in (node.get("children") or [])]}
-        return [norm(n) for n in data]
+        Строится из documents.list (поддерживается всеми версиями Yonote) по
+        полю parentDocumentId. Если доступен collections.documents (готовое
+        дерево навигации) — используется он."""
+        # основной путь: collections.documents (готовое дерево), но он есть не везде
+        try:
+            data = self._post("collections.documents", {"id": collection_id}).get("data", []) or []
+
+            def norm(node):
+                return {"id": node.get("id"), "title": node.get("title", ""),
+                        "children": [norm(c) for c in (node.get("children") or [])]}
+            if data:
+                return [norm(n) for n in data]
+        except YonoteError:
+            pass
+        # запасной путь: собрать плоский список и восстановить иерархию
+        flat, offset = [], 0
+        while True:
+            resp = self._post("documents.list",
+                              {"collectionId": collection_id, "offset": offset, "limit": 100})
+            batch = resp.get("data", []) or []
+            flat.extend(batch)
+            if len(batch) < 100:
+                break
+            offset += len(batch)
+        nodes = {d.get("id"): {"id": d.get("id"), "title": d.get("title", ""), "children": []}
+                 for d in flat}
+        roots = []
+        for d in flat:
+            node = nodes[d.get("id")]
+            parent = nodes.get(d.get("parentDocumentId"))
+            (parent["children"] if parent else roots).append(node)
+        return roots
 
     def document(self, document_id: str) -> dict:
         """Документ с полным текстом (Markdown) по id."""
