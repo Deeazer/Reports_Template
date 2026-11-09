@@ -548,7 +548,7 @@ function vulnsTab(p, wt, onChanged) {
     h("div", {}, h("b", {}, state.ref.work_types[wt].title),
       h("span", { class: "muted" }, "  —  каждая уязвимость попадает в сводные таблицы автоматически")),
     h("div", { class: "row", style: { gap: "8px" } },
-      auth.isAdmin && h("button", { class: "btn sec", onclick: () => openVulnImport(p, wt, reload) }, "Импорт из Yonote"),
+      h("button", { class: "btn sec", onclick: () => openVulnImport(p, wt, reload) }, "Импорт из Yonote"),
       h("button", { class: "btn", onclick: async () => {
         try { const v = await api.addVuln(p.id, { work_type: wt, title: "Новая уязвимость" }); v._open = true; p.vulns.push(v); draw(); }
         catch (e) { toast(e.message, true); }

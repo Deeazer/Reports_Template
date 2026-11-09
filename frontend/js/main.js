@@ -36,7 +36,9 @@ function shell(content) {
     onclick: () => navigate({ name: key }),
   }, label);
   const nav = h("nav", {}, navBtn("projects", "Проекты"));
-  if (auth.isAdmin) { nav.append(navBtn("users", "Пользователи"), navBtn("settings", "Настройки")); }
+  if (auth.isAdmin) { nav.append(navBtn("users", "Пользователи")); }
+  // «Настройки» доступны всем: исполнители указывают там свой персональный токен Yonote
+  nav.append(navBtn("settings", "Настройки"));
   return h("div", {},
     h("div", { class: "flag-bar" }),
     h("div", { class: "topbar" },
