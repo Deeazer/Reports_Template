@@ -401,7 +401,20 @@ async function openVulnImport(p, wt, reload) {
   const chosen = new Set();
   const importBtn = h("button", { class: "btn", onclick: doImport }, "Импортировать в «" + state.ref.work_types[wt].title + "»");
 
-  const body = h("div", {}, h("div", { class: "muted" }, "Загрузка дерева документов…"));
+  const body = h("div", {}, h("div", { class: "muted" }, "Загрузка…"));
+  const colSel = h("select", { onchange: loadTree });
+
+  async function loadTree() {
+    chosen.clear();
+    treeBox.replaceChildren(h("div", { class: "muted" }, "Загрузка дерева документов…"));
+    result.replaceChildren();
+    try {
+      const { tree } = await api.yonoteTree(colSel.value);
+      treeBox.replaceChildren();
+      if (!tree.length) treeBox.append(h("div", { class: "muted" }, "Коллекция пуста."));
+      tree.forEach(node => treeBox.append(renderNode(node, 0)));
+    } catch (e) { treeBox.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); }
+  }
 
   let cfg = null;
   try { cfg = await api.yonoteConfig(); } catch { /* нет прав */ }
@@ -410,12 +423,13 @@ async function openVulnImport(p, wt, reload) {
     importBtn.style.display = "none";
   } else {
     try {
-      const { tree } = await api.yonoteTree();
+      const { collections } = await api.yonoteCollections();
+      colSel.replaceChildren(...collections.map(c => h("option", { value: c.id, selected: c.id === cfg.collection_id }, c.name)));
       body.replaceChildren(
+        field("Коллекция", colSel),
         h("p", { class: "muted", style: { marginTop: 0 } }, "Отметьте документы-уязвимости (один документ = одна уязвимость). Папки можно раскрывать."),
         treeBox, result);
-      if (!tree.length) treeBox.append(h("div", { class: "muted" }, "Коллекция пуста."));
-      tree.forEach(node => treeBox.append(renderNode(node, 0)));
+      await loadTree();
     } catch (e) { body.replaceChildren(h("div", { style: { color: "var(--crit)" } }, e.message)); importBtn.style.display = "none"; }
   }
 

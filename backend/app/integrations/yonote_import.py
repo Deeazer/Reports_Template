@@ -253,37 +253,63 @@ def _row_cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
+def _apply_field(v: dict, key: str, val: str):
+    """Присваивает поле уязвимости по метке и значению (из таблицы или строки)."""
+    mvec = _CVSS_RE.search(val)
+    if mvec:                         # значение-вектор — это CVSS, какой бы ни была метка
+        v["cvss_vector"] = mvec.group(0)
+        return
+    key = (key or "").lower().strip(" *_:")
+    if key in _VULN_SKIP_KEYS:       # напр. «CVSSv3.1 | 8.6» — число игнорируем
+        return
+    field = _VULN_TABLE_FIELDS.get(key)
+    if field == "work_type":
+        v["work_type"] = _norm_wt(val) or ""
+    elif field and not v.get(field):
+        v[field] = val
+
+
+def _body_start(lines: list[str]) -> int:
+    """Индекс первой строки тела — заголовка ## или жирной метки **…**."""
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*#{1,3}\s+\S", line) or re.match(r"^\s*\*\*.+?\*\*", line):
+            return i
+    return len(lines)
+
+
 def parse_vuln(title: str, text: str) -> dict:
     """Разбирает документ-уязвимость Yonote в поля модели Vulnerability.
-    work_type может оказаться пустым — тогда подставляется при импорте."""
+
+    Поля читаются как из markdown-таблицы «поле | значение», так и из простых
+    строк «Поле: значение» (списком или просто текстом) в начале документа —
+    оформление роли не играет. work_type может оказаться пустым — тогда
+    подставляется при импорте.
+    """
     v = {"title": _strip_emoji(title) or "Уязвимость", "work_type": ""}
     lines = (text or "").splitlines()
-    table, after = _first_table(lines)
+    head_end = _body_start(lines)
+    head, body_lines = lines[:head_end], lines[head_end:]
 
+    # 1) поля из таблицы в шапке
+    table, _ = _first_table(head)
     for row in table:
         cells = _row_cells(row)
         if len(cells) < 2 or _is_sep_row(cells):
-            # строка без метки, но со значением-вектором — это вектор CVSS
             if cells and _CVSS_RE.search(" ".join(cells)):
                 v["cvss_vector"] = _CVSS_RE.search(" ".join(cells)).group(0)
             continue
-        key = cells[0].lower().strip(" *_:")
-        val = cells[1].strip()
-        # значение-вектор перекрывает любую метку (в т.ч. пустую или «CVSSv3.1»)
-        mvec = _CVSS_RE.search(val)
-        if mvec:
-            v["cvss_vector"] = mvec.group(0)
-            continue
-        if key in _VULN_SKIP_KEYS:
-            continue
-        field = _VULN_TABLE_FIELDS.get(key)
-        if field == "work_type":
-            v["work_type"] = _norm_wt(val) or ""
-        elif field:
-            v[field] = val
+        _apply_field(v, cells[0], cells[1].strip())
 
-    # тело после таблицы: блоки PoC/результатов/рекомендаций
-    rest = "\n".join(lines[after:]).strip()
+    # 2) поля из простых строк «Поле: значение» в шапке (не табличных)
+    for line in head:
+        if line.lstrip().startswith("|"):
+            continue
+        kv = _split_kv(line)
+        if kv:
+            _apply_field(v, kv[0], kv[1])
+
+    # тело: блоки PoC/результатов/рекомендаций
+    rest = "\n".join(body_lines).strip()
     if rest:
         # по «жирным» меткам **Метка:** …
         blocks = re.split(r"(?m)^\s*\*\*(.+?)\*\*\s*[:：]?\s*", rest)
